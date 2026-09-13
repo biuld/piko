@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use piko_llmd::gateway::{InferenceError, InferenceExecution, InferenceRequest};
-use piko_orchd_api::StartExecutionRequest;
 use piko_protocol::agent_work::{CommitAck, CommitError};
 
 use super::*;
@@ -260,8 +259,8 @@ fn request() -> StartExecutionRequest {
         user_mentions: Vec::new(),
         input_message_id: "message".into(),
         input: piko_protocol::MessageContent::String("hello".into()),
-        context: piko_orchd_api::ConversationContext::empty(),
-        config: piko_orchd_api::ExecutionConfig {
+        context: ConversationContext::empty(),
+        config: ExecutionConfig {
             agent_id: "main".into(),
             ..Default::default()
         },

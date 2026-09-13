@@ -3,9 +3,10 @@
 //! Integrators (such as hostd) depend on this crate for traits, errors, and
 //! port types. The runtime implementation lives in the `orchd` crate.
 //!
-//! Product surface: [`AgentRuntimeApi`]. ExecutionActor is an orchd-internal
-//! implementation detail. Durable writes go through [`ExecutionCommitPort`] and
-//! [`AgentCommitPort`].
+//! Product surface: [`AgentRuntimeApi`]. The short-lived ExecutionActor and
+//! its request/receipt DTOs are orchd-internal (ADR-027): there are no
+//! Execution-addressed public commands. Durable writes go through
+//! [`ExecutionCommitPort`] and [`AgentCommitPort`].
 
 pub mod agent;
 pub mod approval;
@@ -28,10 +29,8 @@ pub use approval::{
 };
 pub use error::{AgentApiError, SessionStreamError, SnapshotRequiredReason};
 pub use execution::{
-    ApprovalPort, CancelExecutionRequest, CancelReason, CancelReceipt, ConversationContext,
-    ExecutionCommitPort, ExecutionConfig, ExecutionInputReceipt, ExecutionReceipt, ExecutionStatus,
-    InputDisposition, InteractionPort, PromptAssemblyPort, RealtimeDeltaSink,
-    SessionExecutionPorts, StartExecutionRequest, SteerExecutionRequest, TrajectoryCapturePort,
+    ApprovalPort, ExecutionCommitPort, InteractionPort, PromptAssemblyPort, RealtimeDeltaSink,
+    SessionExecutionPorts, TrajectoryCapturePort,
 };
 pub use request::SubscribeRequest;
 pub use response::SessionRuntimeSnapshot;
@@ -44,7 +43,6 @@ pub use tools::{
 // Re-export durable work DTOs shared with hostd.
 pub use piko_protocol::agent_work::{
     AgentInputDisposition, AgentWorkOutcome, CommitAck, CommitError,
-    MessageCommit as ExecutionMessageCommit,
 };
 pub use piko_protocol::{
     AgentActivity, AgentArtifactRef, AgentCommitAck, AgentDurableCommand, AgentInboxItem,

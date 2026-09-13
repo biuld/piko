@@ -43,7 +43,7 @@ impl MessageCommitScope {
     ) -> Result<CommittedMessage, AgentApiError> {
         port.commit_message(self.commit.clone())
             .await
-            .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
+            .map_err(crate::runtime::reliability::commit_error_to_agent)?;
         Ok(CommittedMessage {
             message_id: self.commit.message_id,
             message: self.commit.message,
@@ -57,7 +57,7 @@ impl MessageCommitScope {
     ) -> Result<CommittedMessage, AgentApiError> {
         port.commit_steer(self.commit.clone(), change)
             .await
-            .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
+            .map_err(crate::runtime::reliability::commit_error_to_agent)?;
         Ok(CommittedMessage {
             message_id: self.commit.message_id,
             message: self.commit.message,

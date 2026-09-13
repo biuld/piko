@@ -65,7 +65,7 @@ impl PreparedExecution {
                 .commit
                 .commit_message(commit.clone())
                 .await
-                .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
+                .map_err(crate::runtime::reliability::commit_error_to_agent)?;
         }
         for commit in &self.completion_commits {
             self.scope
@@ -73,7 +73,7 @@ impl PreparedExecution {
                 .commit
                 .commit_message(commit.clone())
                 .await
-                .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
+                .map_err(crate::runtime::reliability::commit_error_to_agent)?;
         }
         for commit in &self.mention_commits {
             self.scope
@@ -81,7 +81,7 @@ impl PreparedExecution {
                 .commit
                 .commit_message(commit.clone())
                 .await
-                .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
+                .map_err(crate::runtime::reliability::commit_error_to_agent)?;
         }
         Ok(())
     }

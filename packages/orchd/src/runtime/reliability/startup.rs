@@ -4,6 +4,7 @@ use piko_orchd_api::{AgentApiError, AgentCommitPort};
 use piko_protocol::{AgentDurableCommand, AgentInputReceipt};
 
 use crate::runtime::execution::PreparedExecution;
+use crate::runtime::reliability::commit_error_to_agent;
 
 /// A prepared Execution whose retained prelude and durable Agent work have not
 /// been committed yet.
@@ -36,7 +37,7 @@ impl PreparedStartup {
         }
         if let Err(error) = commit.commit_agent_command(session_id, command).await {
             self.prepared.rollback().await;
-            return Err(AgentApiError::PersistenceFailed(error.to_string()));
+            return Err(commit_error_to_agent(error));
         }
         Ok(InputCommittedStartup {
             prepared: self.prepared,

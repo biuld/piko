@@ -31,7 +31,6 @@ impl ExecutionActor {
         }
         transcript.push_user_content(request.input.clone(), None);
         let state = ExecutionState {
-            status: ExecutionStatus::Accepted,
             transcript,
             model_step_index: 0,
             steering: VecDeque::new(),
@@ -94,8 +93,6 @@ impl ExecutionActor {
     }
 
     pub(super) async fn run_loop(&mut self) -> Result<AgentWorkOutcome, AgentApiError> {
-        self.transition(ExecutionStatus::Running);
-
         loop {
             if self.cancel.is_cancelled() {
                 return Ok(AgentWorkOutcome::Cancelled {

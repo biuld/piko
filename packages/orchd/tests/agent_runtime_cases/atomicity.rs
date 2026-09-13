@@ -428,3 +428,15 @@ async fn failed_message_commit_never_advances_reusable_agent_transcript() {
     ));
     assert!(report.summary.is_empty());
 }
+struct PanicGateway;
+
+#[async_trait]
+impl piko_llmd::gateway::InferenceGateway for PanicGateway {
+    async fn start(
+        &self,
+        _req: piko_llmd::gateway::InferenceRequest,
+        _cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<piko_llmd::gateway::InferenceExecution, piko_llmd::gateway::InferenceError> {
+        panic!("injected gateway panic")
+    }
+}

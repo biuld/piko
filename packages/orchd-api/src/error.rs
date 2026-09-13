@@ -20,34 +20,22 @@ pub enum AgentApiError {
     AgentCountLimitExceeded,
     #[error("agent tree depth limit exceeded")]
     AgentDepthLimitExceeded,
-    #[error("task not found")]
-    TaskNotFound,
     #[error("execution not found")]
     ExecutionNotFound,
     #[error("session not attached")]
     SessionNotAttached,
     #[error("session already attached")]
     SessionAlreadyAttached,
-    #[error("session and task do not match")]
-    SessionMismatch,
-    #[error("task is closed")]
-    TaskClosed,
-    #[error("task is terminated")]
-    TaskTerminated,
-    #[error("invalid task state")]
+    #[error("invalid state")]
     InvalidState,
     #[error("execution already active")]
     ExecutionAlreadyActive,
-    #[error("duplicate request")]
-    DuplicateRequest,
     #[error("idempotency key conflicts with a previous payload")]
     IdempotencyConflict,
     #[error("input rejected")]
     InputRejected,
     #[error("mailbox overload")]
     Overload,
-    #[error("persistence unavailable")]
-    PersistenceUnavailable,
     #[error("persistence failed: {0}")]
     PersistenceFailed(String),
     #[error("prompt assembly failed: {0}")]
@@ -58,8 +46,6 @@ pub enum AgentApiError {
     ContextBudgetExceeded(String),
     #[error("runtime unavailable")]
     RuntimeUnavailable,
-    #[error("a fresh snapshot is required")]
-    SnapshotRequired,
     #[error("operation cancelled")]
     Cancelled,
 }

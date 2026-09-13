@@ -33,12 +33,26 @@ use crate::runtime::reliability::RunCancellation;
 /// Mandatory facade and Actor supervisor for multi-agent runtime operations.
 pub struct AgentRuntime {
     execution: Arc<AgentExecutionRuntime>,
-    sessions: RwLock<HashMap<String, Arc<SessionAgentScope>>>,
+    sessions: RwLock<HashMap<String, SessionSlot>>,
     context_tools: Arc<crate::adapters::tools::ContextToolsProvider>,
     agent_limits: AgentTreeLimits,
 }
 
+enum SessionSlot {
+    Attaching(Arc<SessionAgentScope>),
+    Ready(Arc<SessionAgentScope>),
+}
+
+impl SessionSlot {
+    fn scope(&self) -> &Arc<SessionAgentScope> {
+        match self {
+            Self::Attaching(scope) | Self::Ready(scope) => scope,
+        }
+    }
+}
+
 mod api_impl;
+mod attach;
 mod runtime_impl;
 
 fn agent_depth(parents: &HashMap<String, Option<String>>, agent_instance_id: &str) -> usize {

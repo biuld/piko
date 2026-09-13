@@ -129,14 +129,6 @@ impl TodoProvider {
             },
         ]
     }
-
-    fn now_ms() -> i64 {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0)
-    }
 }
 
 #[async_trait]
@@ -164,7 +156,7 @@ impl ToolProvider for TodoProvider {
                     let mut guard = self.state.write().await;
                     let entry = guard.entry(key).or_default();
                     entry.revision = entry.revision.saturating_add(1);
-                    entry.updated_at = Self::now_ms();
+                    entry.updated_at = crate::ports::clock::now_ms();
                     entry.items = items;
                     let normalized = todos_tool_json(&entry.items);
                     ToolExecResult {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::ports::clock::now_ms;
 use piko_protocol::agent_work::{MessageCommit, ModelStepCommit};
 use piko_protocol::{
     TrajectoryChildRunRecord, TrajectoryIdentity, TrajectoryNotificationKind, TrajectoryRecord,
@@ -415,11 +416,4 @@ impl ExecutionActor {
         self.state.respond_after_steer = true;
         Ok(())
     }
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
 }

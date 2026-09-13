@@ -7,10 +7,7 @@ mod run_protocol;
 
 use piko_comms::contracts::{AgentCommands, AgentSnapshot as AgentSnapshotContract};
 use piko_comms::{LatestSender, MailboxReceiver, MailboxSender};
-use piko_orchd_api::{
-    AgentApiError, AgentCommitPort, ConversationContext, ExecutionConfig, StartExecutionRequest,
-    SteerExecutionRequest,
-};
+use piko_orchd_api::{AgentApiError, AgentCommitPort};
 use piko_protocol::{
     AgentActivity, AgentDurableCommand, AgentInboxItem, AgentInboxSnapshot, AgentInputDelivery,
     AgentInputReceipt, AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt,
@@ -19,10 +16,13 @@ use piko_protocol::{
 
 use super::mailbox::{AgentCommand, DetachedReportTarget};
 use super::scope::SessionAgentScope;
-use crate::runtime::execution::{AgentExecutionRuntime, ExecutionTerminal};
+use crate::runtime::execution::{
+    AgentExecutionRuntime, ConversationContext, ExecutionConfig, ExecutionTerminal,
+    StartExecutionRequest, SteerExecutionRequest,
+};
 use crate::runtime::reliability::{
     ActorCommandScope, DetachedDeliveryResult, DetachedDeliveryScope, ExecutionHandoffLease,
-    RunCancellation, RunStartupScope, TerminalCommitResult, TerminalCommitScope,
+    RetryState, RunCancellation, RunStartupScope, TerminalCommitResult, TerminalCommitScope,
 };
 use crate::runtime::utils::now_ms;
 
@@ -72,6 +72,10 @@ struct QueuedRuntimeInput {
     detached: Option<DetachedReportTarget>,
     /// Parent span captured when the follow-up was queued.
     parent: tracing::Span,
+    /// Bounded backoff state for retryable startup failures.
+    retry: RetryState,
+    /// Permanent startup error whose durable cancellation is still pending.
+    terminal_failure: Option<String>,
 }
 
 #[derive(Clone)]

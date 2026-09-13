@@ -21,6 +21,7 @@ impl AgentActor {
         scope: std::sync::Weak<SessionAgentScope>,
         run_cancellation: Arc<RunCancellation>,
     ) -> Self {
+        let mut input_requests = HashMap::new();
         Self {
             identity,
             spec,
@@ -28,23 +29,46 @@ impl AgentActor {
             transcript,
             head_message_id,
             inbox,
-            follow_ups: queued_inputs
-                .into_iter()
-                .map(|input| {
+            follow_ups: {
+                let mut follow_ups = Vec::with_capacity(queued_inputs.len());
+                for (index, input) in queued_inputs.into_iter().enumerate() {
                     let detached = input.detached_recipient_agent_instance_id.as_ref().map(
                         |agent_instance_id| DetachedReportTarget {
                             agent_instance_id: agent_instance_id.clone(),
                         },
                     );
-                    QueuedRuntimeInput {
-                        request: input.to_request(),
+                    // Rebuild the in-memory idempotency index from the durable
+                    // journal so a retried pending follow-up after recovery is
+                    // deduplicated by `handle_input_request` instead of being
+                    // admitted twice.
+                    let request = input.to_request();
+                    let accepted = AcceptedAgentInput {
+                        receipt: AgentInputReceipt {
+                            input_id: input.input_id.clone(),
+                            request_id: request.request_id.clone(),
+                            session_id: input.session_id.clone(),
+                            agent_instance_id: input.agent_instance_id.clone(),
+                            disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
+                            queued_position: Some(index as u32),
+                        },
+                        root_input_id: input.input_id.clone(),
+                    };
+                    input_requests.insert(
+                        request.request_id.clone(),
+                        (request.clone(), input.clone(), Some(accepted)),
+                    );
+                    follow_ups.push(QueuedRuntimeInput {
+                        request,
                         input,
                         detached,
                         parent: tracing::Span::none(),
-                    }
-                })
-                .collect(),
-            input_requests: HashMap::new(),
+                        retry: RetryState::default(),
+                        terminal_failure: None,
+                    });
+                }
+                follow_ups.into_iter().collect()
+            },
+            input_requests,
             run_state: AgentRunState::Idle,
             latest_report,
             completed_executions: execution_reports
@@ -67,6 +91,13 @@ impl AgentActor {
     }
 
     pub async fn run(mut self) {
+        let Some(scope) = self.scope.upgrade() else {
+            return;
+        };
+        if !scope.wait_until_ready().await {
+            return;
+        }
+        drop(scope);
         for delivery in std::mem::take(&mut self.recovered_detached_deliveries) {
             self.deliver_report_or_retry(DetachedDeliveryScope::new(
                 delivery.recipient_agent_instance_id,
@@ -322,6 +353,8 @@ impl AgentActor {
             request,
             detached,
             parent,
+            retry: RetryState::default(),
+            terminal_failure: None,
         });
         self.publish_snapshot();
         self.publish_mailbox_event(AgentMailboxEvent::InputQueued {
@@ -413,11 +446,10 @@ impl AgentActor {
             });
         }
         self.execution
-            .request_cancel(piko_orchd_api::CancelExecutionRequest {
+            .request_cancel(crate::runtime::execution::CancelExecutionRequest {
                 request_id,
                 session_id: self.identity.session_id.clone(),
                 root_input_id,
-                reason: piko_orchd_api::CancelReason::Superseded,
             })
             .await
             .map(|receipt| piko_protocol::AgentCancelReceipt {

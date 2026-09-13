@@ -163,7 +163,6 @@ impl AgentExecutionRuntime {
             session_id: identity.session_id.clone(),
             root_input_id: identity.root_input_id.clone(),
             agent_instance_id: identity.agent_instance_id.clone(),
-            status: ExecutionStatus::Accepted,
         };
 
         let tools = request.tool_catalog.tools.clone();
@@ -251,7 +250,7 @@ impl AgentExecutionRuntime {
     pub(crate) async fn steer_execution(
         &self,
         request: SteerExecutionRequest,
-    ) -> Result<ExecutionInputReceipt, AgentApiError> {
+    ) -> Result<(), AgentApiError> {
         let scope = self.scope(&request.session_id).await?;
         let handle = scope
             .get_execution(&request.root_input_id)

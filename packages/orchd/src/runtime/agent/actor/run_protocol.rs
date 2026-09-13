@@ -189,11 +189,10 @@ impl AgentActor {
         if startup_cancel.is_cancelled() {
             let _ = self
                 .execution
-                .request_cancel(piko_orchd_api::CancelExecutionRequest {
+                .request_cancel(crate::runtime::execution::CancelExecutionRequest {
                     request_id: format!("cancel-startup-{canonical_input_id}"),
                     session_id: self.identity.session_id.clone(),
                     root_input_id: canonical_input_id.clone(),
-                    reason: piko_orchd_api::CancelReason::Superseded,
                 })
                 .await;
         }

@@ -5,7 +5,6 @@ mod blocking_tool;
 #[path = "common/faux_provider.rs"]
 mod faux_provider;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -83,6 +82,7 @@ struct CollectingAgentCommitPort {
     conflict_run_terminals: AtomicU64,
     terminal_attempts: AtomicU64,
     fail_report_commits: AtomicU64,
+    fail_input_cancellations: AtomicU64,
 }
 
 struct FailingMessageCommitPort {
@@ -95,8 +95,6 @@ struct BlockingRunStartCommitPort {
     entered: Semaphore,
     release: Semaphore,
 }
-
-struct PanicGateway;
 
 #[derive(Default)]
 struct RecordingPromptAssemblyPort {
@@ -150,62 +148,6 @@ fn gateway_prompt_text(request: &piko_llmd::gateway::InferenceRequest) -> String
         .map(|block| block.content.as_str())
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-struct StrictCreateCommitPort {
-    revision: AtomicU64,
-    specs: Mutex<HashMap<String, AgentSpec>>,
-}
-
-impl StrictCreateCommitPort {
-    fn with_agent(agent_instance_id: &str, spec: AgentSpec) -> Self {
-        Self {
-            revision: AtomicU64::new(0),
-            specs: Mutex::new(HashMap::from([(agent_instance_id.into(), spec)])),
-        }
-    }
-}
-
-#[async_trait]
-impl AgentCommitPort for StrictCreateCommitPort {
-    async fn commit_agent_command(
-        &self,
-        session_id: &str,
-        command: AgentDurableCommand,
-    ) -> Result<AgentCommitAck, CommitError> {
-        let agent_instance_id = match command {
-            AgentDurableCommand::Create { identity, spec, .. } => {
-                let mut specs = self.specs.lock().await;
-                match specs.get(&identity.agent_instance_id) {
-                    Some(existing) if existing != &spec => {
-                        return Err(CommitError::IdempotencyConflict);
-                    }
-                    Some(_) => {}
-                    None => {
-                        specs.insert(identity.agent_instance_id.clone(), spec);
-                    }
-                }
-                identity.agent_instance_id
-            }
-            _ => String::new(),
-        };
-        Ok(AgentCommitAck {
-            session_id: session_id.into(),
-            agent_instance_id,
-            revision: self.revision.fetch_add(1, Ordering::SeqCst) + 1,
-        })
-    }
-}
-
-#[async_trait]
-impl piko_llmd::gateway::InferenceGateway for PanicGateway {
-    async fn start(
-        &self,
-        _req: piko_llmd::gateway::InferenceRequest,
-        _cancel: tokio_util::sync::CancellationToken,
-    ) -> Result<piko_llmd::gateway::InferenceExecution, piko_llmd::gateway::InferenceError> {
-        panic!("injected gateway panic")
-    }
 }
 
 #[async_trait]
@@ -296,6 +238,10 @@ impl CollectingAgentCommitPort {
         self.fail_report_commits.fetch_add(1, Ordering::SeqCst);
     }
 
+    fn fail_next_input_cancellation(&self) {
+        self.fail_input_cancellations.fetch_add(1, Ordering::SeqCst);
+    }
+
     fn consume_failure(counter: &AtomicU64) -> bool {
         counter
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
@@ -349,6 +295,14 @@ impl AgentCommitPort for CollectingAgentCommitPort {
         }
         if matches!(&command, AgentDurableCommand::CommitReport { .. })
             && Self::consume_failure(&self.fail_report_commits)
+        {
+            return Err(CommitError::Unavailable);
+        }
+        if matches!(
+            &command,
+            AgentDurableCommand::AgentInputDispositionChanged { change }
+                if change.disposition == piko_protocol::AgentInputDisposition::Cancelled
+        ) && Self::consume_failure(&self.fail_input_cancellations)
         {
             return Err(CommitError::Unavailable);
         }
@@ -514,6 +468,8 @@ include!("agent_runtime_cases/races.rs");
 include!("agent_runtime_cases/context/mod.rs");
 include!("agent_runtime_cases/multi_agent.rs");
 include!("agent_runtime_cases/recovery.rs");
+include!("agent_runtime_cases/recovery_regressions.rs");
+include!("agent_runtime_cases/reliability_regressions.rs");
 include!("agent_runtime_cases/recovery_delegation.rs");
 include!("agent_runtime_cases/shutdown.rs");
 include!("agent_runtime_cases/tool_sets.rs");

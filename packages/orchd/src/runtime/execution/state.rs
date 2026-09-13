@@ -1,12 +1,11 @@
 use std::collections::VecDeque;
 
-use piko_orchd_api::{ExecutionStatus, SteerExecutionRequest};
 use piko_protocol::Usage;
 
 use crate::domain::transcript::TranscriptManager;
+use crate::runtime::execution::dto::SteerExecutionRequest;
 
 pub(crate) struct ExecutionState {
-    pub status: ExecutionStatus,
     pub transcript: TranscriptManager,
     pub model_step_index: u32,
     pub steering: VecDeque<SteerExecutionRequest>,

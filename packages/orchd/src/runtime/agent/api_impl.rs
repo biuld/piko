@@ -17,6 +17,9 @@ impl AgentRuntimeApi for AgentRuntime {
         let session_id = config.session_id.clone();
         let root = config.root.clone();
         let mut recovered_agents = config.recovered_agents;
+        // Validate the full recovered tree before removing the root recovery
+        // entry, and before any durable write or actor spawn.
+        Self::validate_recovered_tree(&root, &recovered_agents)?;
         let root_recovery = recovered_agents
             .iter()
             .position(|state| state.identity.agent_instance_id == root.agent_instance_id)
@@ -37,27 +40,17 @@ impl AgentRuntimeApi for AgentRuntime {
             self.agent_limits,
         ));
 
-        config
-            .ports
-            .agents
-            .commit_agent_command(
-                &session_id,
-                AgentDurableCommand::Create {
-                    identity: root.clone(),
-                    spec: root_spec,
-                    origin_root_input_id: None,
-                    origin_tool_call_id: None,
-                },
-            )
-            .await
-            .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
-
+        // Reserve the session before the durable Create commit: a duplicate
+        // or concurrent attach must fail closed without external side effects.
         {
             let mut sessions = self.sessions.write().await;
             if sessions.contains_key(&session_id) {
                 return Err(AgentApiError::SessionAlreadyAttached);
             }
-            sessions.insert(session_id.clone(), Arc::clone(&scope));
+            sessions.insert(
+                session_id.clone(),
+                SessionSlot::Attaching(Arc::clone(&scope)),
+            );
         }
 
         if let Err(error) = self
@@ -65,15 +58,15 @@ impl AgentRuntimeApi for AgentRuntime {
             .attach_session(session_id.clone(), config.ports.executions)
             .await
         {
-            self.sessions.write().await.remove(&session_id);
+            Self::remove_session_if_scope(self, &session_id, &scope).await;
             return Err(error);
         }
+
         if let Err(error) = self
-            .spawn_agent_actor(&scope, root.clone(), None, root_recovery)
+            .commit_agent_root(&scope, &root, root_spec, root_recovery)
             .await
         {
-            self.sessions.write().await.remove(&session_id);
-            let _ = self.execution.detach_session(session_id.clone()).await;
+            Self::cleanup_session(self, &session_id, &scope).await;
             return Err(error);
         }
         for recovered in recovered_agents {
@@ -82,12 +75,24 @@ impl AgentRuntimeApi for AgentRuntime {
                 .spawn_agent_actor(&scope, identity, None, Some(recovered))
                 .await
             {
-                scope.shutdown().await;
-                self.sessions.write().await.remove(&session_id);
-                let _ = self.execution.detach_session(session_id.clone()).await;
+                Self::cleanup_session(self, &session_id, &scope).await;
                 return Err(error);
             }
         }
+        {
+            let mut sessions = self.sessions.write().await;
+            match sessions.get(&session_id) {
+                Some(SessionSlot::Attaching(current)) if Arc::ptr_eq(current, &scope) => {
+                    sessions.insert(session_id.clone(), SessionSlot::Ready(Arc::clone(&scope)));
+                }
+                _ => {
+                    drop(sessions);
+                    Self::cleanup_session(self, &session_id, &scope).await;
+                    return Err(AgentApiError::RuntimeUnavailable);
+                }
+            }
+        }
+        scope.activate();
         Ok(SessionAgentHandle {
             session_id,
             root_agent_instance_id: root.agent_instance_id,
@@ -95,12 +100,18 @@ impl AgentRuntimeApi for AgentRuntime {
     }
 
     async fn detach_agent_session(&self, session_id: String) -> Result<(), AgentApiError> {
-        let scope = self
-            .sessions
-            .write()
-            .await
-            .remove(&session_id)
-            .ok_or(AgentApiError::SessionNotAttached)?;
+        let scope = {
+            let mut sessions = self.sessions.write().await;
+            let scope = match sessions.get(&session_id) {
+                Some(SessionSlot::Ready(scope)) => Arc::clone(scope),
+                Some(SessionSlot::Attaching(_)) => {
+                    return Err(AgentApiError::RuntimeUnavailable);
+                }
+                None => return Err(AgentApiError::SessionNotAttached),
+            };
+            sessions.remove(&session_id);
+            scope
+        };
         scope.shutdown().await;
         self.execution.detach_session(session_id).await
     }
@@ -110,6 +121,11 @@ impl AgentRuntimeApi for AgentRuntime {
         request: CreateAgentRequest,
     ) -> Result<CreateAgentReceipt, AgentApiError> {
         let scope = self.scope(&request.session_id).await?;
+        // The scope is bound to one session; a recovered actor committing a
+        // foreign session_id through it must never resolve here.
+        if scope.session_id() != request.session_id {
+            return Err(AgentApiError::AgentParentMismatch);
+        }
         let _create_guard = scope.lock_create().await;
         if let Some(receipt) = scope.create_receipt(&request).await? {
             return Ok(receipt);

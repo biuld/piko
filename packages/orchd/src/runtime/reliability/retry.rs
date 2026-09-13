@@ -1,4 +1,14 @@
+use piko_orchd_api::AgentApiError;
 use piko_protocol::CommitError;
+
+pub(crate) fn commit_error_to_agent(error: CommitError) -> AgentApiError {
+    match error {
+        CommitError::IdentityMismatch | CommitError::IdempotencyConflict => {
+            AgentApiError::IdempotencyConflict
+        }
+        error => AgentApiError::PersistenceFailed(error.to_string()),
+    }
+}
 
 pub(crate) enum CommitFailure {
     Retryable,
@@ -49,6 +59,10 @@ mod tests {
         assert!(matches!(
             RetryState::classify(CommitError::Unavailable),
             CommitFailure::Retryable
+        ));
+        assert!(matches!(
+            commit_error_to_agent(CommitError::IdempotencyConflict),
+            AgentApiError::IdempotencyConflict
         ));
     }
 }

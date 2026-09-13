@@ -346,6 +346,49 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
 }
 
 #[tokio::test]
+async fn attach_rejects_a_mismatched_root_recovery_before_commit() {
+    let model = Arc::new(FauxProvider::new());
+    let runtime = AgentRuntime::new(model as Arc<dyn piko_llmd::gateway::InferenceGateway>);
+    runtime.register_agent(test_agent()).await;
+    let agents = Arc::new(CollectingAgentCommitPort::default());
+    let session_id = "session-invalid-root".to_string();
+    let root = AgentInstanceIdentity {
+        session_id: session_id.clone(),
+        agent_instance_id: "root".into(),
+        agent_spec_id: "main".into(),
+        parent_agent_instance_id: None,
+    };
+    let mut recovered_root = root.clone();
+    recovered_root.parent_agent_instance_id = Some("foreign-parent".into());
+    let result = runtime
+        .attach_agent_session(SessionAgentConfig {
+            session_id,
+            root,
+            recovered_agents: vec![AgentRecoveryState {
+                identity: recovered_root,
+                spec: test_agent(),
+                lifecycle: AgentInstanceLifecycle::Open,
+                transcript: Vec::new(),
+                head_message_id: None,
+                inbox: Vec::new(),
+                latest_report: None,
+                execution_reports: Vec::new(),
+                queued_inputs: Vec::new(),
+                pending_detached_deliveries: Vec::new(),
+            }],
+            ports: SessionAgentPorts {
+                agents: agents.clone() as Arc<dyn AgentCommitPort>,
+                executions: SessionExecutionPorts::new(Arc::new(
+                    CollectingExecutionCommitPort::new(),
+                )),
+            },
+        })
+        .await;
+    assert!(matches!(result, Err(piko_orchd_api::AgentApiError::AgentParentMismatch)));
+    assert!(agents.commands.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn attach_restores_durable_agent_spec_instead_of_live_registry() {
     let model = Arc::new(FauxProvider::new());
     model.push_text("with multi_agent tools").await;

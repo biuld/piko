@@ -163,8 +163,11 @@ impl AgentRuntime {
             .read()
             .await
             .get(session_id)
-            .cloned()
-            .ok_or(AgentApiError::SessionNotAttached)
+            .map(|slot| match slot {
+                SessionSlot::Ready(scope) => Ok(Arc::clone(scope)),
+                SessionSlot::Attaching(_) => Err(AgentApiError::RuntimeUnavailable),
+            })
+            .unwrap_or(Err(AgentApiError::SessionNotAttached))
     }
 
     pub(super) async fn spawn_agent_actor(

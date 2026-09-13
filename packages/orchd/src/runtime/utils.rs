@@ -1,12 +1,6 @@
 use std::collections::HashMap;
 
-/// Returns the current Unix timestamp in milliseconds.
-pub(crate) fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
-}
+pub(crate) use crate::ports::clock::now_ms;
 
 /// Bound a JSON argument body recorded in spans to a sane size.
 pub fn truncate_json(value: &serde_json::Value, max: usize) -> String {

@@ -2,15 +2,16 @@ use piko_comms::contracts::{
     ExecutionCommandReply, ExecutionCommands, ExecutionTerminal as ExecutionTerminalContract,
 };
 use piko_comms::{MailboxSender, ReplyReceiver, ReplySender};
-use piko_orchd_api::{AgentApiError, CancelReceipt, ExecutionInputReceipt, SteerExecutionRequest};
+use piko_orchd_api::AgentApiError;
 use tokio_util::sync::CancellationToken;
 
+use super::dto::{CancelReceipt, SteerExecutionRequest};
 use super::{ExecutionIdentity, ExecutionTerminal};
 
 pub enum ExecutionCommand {
     Steer {
         request: SteerExecutionRequest,
-        reply: ReplySender<ExecutionCommandReply, Result<ExecutionInputReceipt, AgentApiError>>,
+        reply: ReplySender<ExecutionCommandReply, Result<(), AgentApiError>>,
     },
     Cancel {
         request_id: String,

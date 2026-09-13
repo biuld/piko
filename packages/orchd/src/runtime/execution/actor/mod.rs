@@ -3,17 +3,15 @@ use std::sync::Arc;
 
 use piko_comms::MailboxReceiver;
 use piko_comms::contracts::ExecutionCommands;
+use piko_orchd_api::AgentApiError;
 use piko_orchd_api::telemetry::ModelStepTelemetry;
-use piko_orchd_api::{
-    AgentApiError, CancelReceipt, ExecutionInputReceipt, ExecutionStatus, InputDisposition,
-    StartExecutionRequest, SteerExecutionRequest,
-};
 use piko_protocol::agent_work::{AgentWorkOutcome, ModelStepOutcome};
 use piko_protocol::{Message, Usage};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use super::ExecutionIdentity;
+use super::dto::{CancelReceipt, StartExecutionRequest, SteerExecutionRequest};
 use super::mailbox::ExecutionCommand;
 use super::scope::SessionExecutionScope;
 use super::services::ExecutionServices;

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
 use piko_comms::BroadcastSender;
 use piko_comms::contracts::AgentMailboxEvent as AgentMailboxEventContract;
@@ -9,6 +9,10 @@ use tokio::sync::Mutex;
 
 use super::mailbox::{AgentCommand, AgentHandle};
 use piko_protocol::{CreateAgentReceipt, CreateAgentRequest};
+
+const SCOPE_ATTACHING: u8 = 0;
+const SCOPE_READY: u8 = 1;
+const SCOPE_STOPPED: u8 = 2;
 
 /// Limits applied when creating new children in one session agent tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +48,7 @@ impl AgentTreeLimits {
 }
 
 pub struct SessionAgentScope {
+    session_id: String,
     commit: std::sync::Arc<dyn AgentCommitPort>,
     agents: Mutex<HashMap<String, AgentHandle>>,
     limits: AgentTreeLimits,
@@ -51,16 +56,19 @@ pub struct SessionAgentScope {
     create_lock: Mutex<()>,
     generation: AtomicU64,
     mailbox_events: BroadcastSender<AgentMailboxEventContract, AgentMailboxEvent>,
+    gate_state: AtomicU8,
+    gate_notify: tokio::sync::Notify,
 }
 
 impl SessionAgentScope {
     pub fn new(
-        _session_id: String,
+        session_id: String,
         _root_agent_instance_id: String,
         commit: std::sync::Arc<dyn AgentCommitPort>,
         limits: AgentTreeLimits,
     ) -> Self {
         Self {
+            session_id,
             commit,
             agents: Mutex::new(HashMap::new()),
             limits,
@@ -68,7 +76,15 @@ impl SessionAgentScope {
             create_lock: Mutex::new(()),
             generation: AtomicU64::new(0),
             mailbox_events: piko_comms::broadcast::<AgentMailboxEventContract, _>().0,
+            gate_state: AtomicU8::new(SCOPE_ATTACHING),
+            gate_notify: tokio::sync::Notify::new(),
         }
+    }
+
+    /// Session this scope is bound to; recovered actors must commit through
+    /// identities that match it.
+    pub fn session_id(&self) -> &str {
+        &self.session_id
     }
 
     pub fn commit(&self) -> &std::sync::Arc<dyn AgentCommitPort> {
@@ -82,6 +98,22 @@ impl SessionAgentScope {
 
     pub fn next_generation(&self) -> u64 {
         self.generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub(crate) fn activate(&self) {
+        self.gate_state.store(SCOPE_READY, Ordering::Release);
+        self.gate_notify.notify_waiters();
+    }
+
+    pub(crate) async fn wait_until_ready(&self) -> bool {
+        loop {
+            let notified = self.gate_notify.notified();
+            match self.gate_state.load(Ordering::Acquire) {
+                SCOPE_READY => return true,
+                SCOPE_STOPPED => return false,
+                _ => notified.await,
+            }
+        }
     }
 
     pub async fn insert_agent(
@@ -213,6 +245,8 @@ impl SessionAgentScope {
     }
 
     pub async fn shutdown(&self) {
+        self.gate_state.store(SCOPE_STOPPED, Ordering::Release);
+        self.gate_notify.notify_waiters();
         let handles = self
             .agents
             .lock()

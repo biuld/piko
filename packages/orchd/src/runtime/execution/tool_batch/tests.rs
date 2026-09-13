@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::runtime::execution::CancelExecutionRequest;
 use piko_llmd::gateway::{ErrorClass, FinishReason, InferenceError, InferenceEvent};
-use piko_orchd_api::{CancelExecutionRequest, CancelReason};
 use piko_protocol::Message;
 use piko_protocol::tools::ToolSetPolicy;
 
@@ -245,7 +245,6 @@ async fn cancellation_mid_batch_commits_aborted_results_for_every_call() {
             request_id: "cancel-batch".into(),
             session_id: "session-batch".into(),
             root_input_id: "exec-cancel".into(),
-            reason: CancelReason::UserRequested,
         })
         .await
         .unwrap();
@@ -325,7 +324,6 @@ async fn cancel_during_sequential_call_does_not_start_pending_parallel_calls() {
             request_id: "cancel-seq".into(),
             session_id: "session-batch".into(),
             root_input_id: "exec-cancel-seq".into(),
-            reason: CancelReason::UserRequested,
         })
         .await
         .unwrap();

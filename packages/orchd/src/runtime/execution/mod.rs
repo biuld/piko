@@ -3,14 +3,18 @@
 mod actor;
 mod bootstrap;
 mod budget;
+pub(crate) mod dto;
 mod mailbox;
 mod prompt;
 mod scope;
 mod services;
 pub(crate) mod state;
 mod tool_batch;
-
 pub use actor::ExecutionActor;
+pub(crate) use dto::{
+    CancelExecutionRequest, CancelReceipt, ConversationContext, ExecutionConfig, ExecutionReceipt,
+    StartExecutionRequest, SteerExecutionRequest,
+};
 pub use mailbox::{ExecutionCommand, ExecutionHandle};
 pub use scope::SessionExecutionScope;
 pub use services::ExecutionServices;
@@ -22,10 +26,7 @@ use futures_util::FutureExt;
 use piko_comms::contracts::{
     ExecutionCommandReply, ExecutionCommands, ExecutionTerminal as ExecutionTerminalContract,
 };
-use piko_orchd_api::{
-    AgentApiError, CancelExecutionRequest, CancelReceipt, ExecutionInputReceipt, ExecutionReceipt,
-    ExecutionStatus, SessionExecutionPorts, StartExecutionRequest, SteerExecutionRequest,
-};
+use piko_orchd_api::{AgentApiError, SessionExecutionPorts};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
