@@ -310,3 +310,42 @@ fn workflow_component_keeps_selection_above_hover() {
         app.theme.bg_hover
     );
 }
+
+/// Regression: a modal border painted onto a wide glyph's trailing column
+/// broke `BufferDiff`'s well-formedness assumption, so the border cell was
+/// never emitted and the terminal kept showing the glyph's right half.
+#[test]
+fn overlay_border_flush_against_wide_glyph_is_repaired() {
+    use ratatui::{buffer::Buffer, style::Style};
+
+    let mut next = Buffer::empty(Rect::new(0, 0, 5, 1));
+    next.set_string(0, 0, "你好", Style::new());
+    let prev = next.clone();
+    // A modal overlay paints its left border onto the wide glyph's trailing column.
+    next.set_string(3, 0, "│", Style::new());
+
+    super::repair_wide_glyph_trailing(&mut next);
+
+    assert_eq!(next[(2, 0)].symbol(), " ", "clipped glyph must be blanked");
+    assert_eq!(next[(3, 0)].symbol(), "│", "border must be kept");
+
+    let diff = prev.diff(&next);
+    assert!(
+        diff.iter()
+            .any(|(x, y, cell)| (*x, *y) == (3, 0) && cell.symbol() == "│"),
+        "border cell must be emitted to the terminal after repair, got {diff:?}"
+    );
+}
+
+#[test]
+fn wide_glyph_with_blank_trailing_is_untouched() {
+    use ratatui::{buffer::Buffer, style::Style};
+
+    let mut buf = Buffer::empty(Rect::new(0, 0, 5, 1));
+    buf.set_string(0, 0, "你好", Style::new());
+
+    super::repair_wide_glyph_trailing(&mut buf);
+
+    assert_eq!(buf[(0, 0)].symbol(), "你");
+    assert_eq!(buf[(2, 0)].symbol(), "好");
+}

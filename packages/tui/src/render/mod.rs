@@ -2,10 +2,12 @@
 
 use ratatui::{
     Frame,
+    buffer::{Buffer, Cell},
     layout::{Position, Rect},
     style::Style,
     widgets::{Block, Borders},
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::{AppMode, AppState, HitId},
@@ -59,6 +61,8 @@ pub fn render_prepared(frame: &mut Frame<'_>, app: &AppState, prepared: &mut Pre
         paint_regions(frame, app, &layer.rects, timeline);
     }
 
+    repair_wide_glyph_trailing(frame.buffer_mut());
+
     // Real terminal caret while inline-editing a tool-interaction workflow.
     // Ratatui hides the cursor on any frame that does not call
     // `set_cursor_position`, so non-editing frames stay caret-free.
@@ -72,6 +76,47 @@ pub fn render_prepared(frame: &mut Frame<'_>, app: &AppState, prepared: &mut Pre
         && let Some(position) = interaction.workflow.input_cursor(area)
     {
         frame.set_cursor_position(position);
+    }
+}
+
+/// Reset wide glyphs whose trailing columns were overwritten by overlay
+/// painting.
+///
+/// The plane paints first and modal layers paint over it. When a
+/// double-width glyph (CJK, emoji) ends flush against a modal border, the
+/// border overwrites the glyph's trailing column, so the buffer violates
+/// `BufferDiff`'s well-formedness assumption ("no double-width cell is
+/// followed by a non-blank cell"). The diff then skips the border cell as the
+/// glyph's trailing column, and the terminal keeps showing the glyph's right
+/// half instead of the border until a full redraw.
+///
+/// Blank such glyphs so the buffer stays well-formed. The affected column
+/// sits flush against the overlay edge where the glyph is visually clipped
+/// anyway, so nothing readable is lost.
+fn repair_wide_glyph_trailing(buf: &mut Buffer) {
+    let area = buf.area;
+    for y in 0..area.height {
+        for x in 0..area.width {
+            let glyph_cols = buf
+                .cell((area.x + x, area.y + y))
+                .map(|cell| UnicodeWidthStr::width(cell.symbol()).max(1) as u16)
+                .unwrap_or(1);
+            if glyph_cols < 2 {
+                continue;
+            }
+            let trailing_non_blank = (1..glyph_cols).take_while(|k| x + k < area.width).any(|k| {
+                buf.cell((area.x + x + k, area.y + y))
+                    .is_some_and(|cell| cell.symbol() != " ")
+            });
+            if !trailing_non_blank {
+                continue;
+            }
+            // Blank only the glyph's leading cell: its trailing columns now
+            // hold real overlay content (e.g. the border) that must survive.
+            if let Some(cell) = buf.cell_mut((area.x + x, area.y + y)) {
+                *cell = Cell::EMPTY;
+            }
+        }
     }
 }
 
