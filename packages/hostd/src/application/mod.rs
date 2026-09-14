@@ -18,5 +18,6 @@ mod trajectory;
 
 pub(crate) use agent_work_control::AgentWorkControl;
 pub use host_app::HostApp;
+pub(crate) use session_history::InspectionCache;
 pub use session_history::SessionHistoryQuery;
 pub use trajectory::TrajectoryQuery;

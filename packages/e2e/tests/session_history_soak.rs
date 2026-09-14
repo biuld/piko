@@ -45,28 +45,24 @@ fn history_overview(
     }
 }
 
-fn journal_kinds(
+fn agent_stream(
     host: &mut HostdHarness,
     session_id: &str,
+    agent: &str,
     revision: u64,
     command_id: &str,
-) -> Vec<String> {
-    host.send(Command::SessionHistoryJournalPageGet {
+) -> piko_protocol::HistoryStreamPage {
+    host.send(Command::SessionHistoryAgentStreamGet {
         command_id: command_id.into(),
         session_id: session_id.into(),
+        agent_instance_id: agent.into(),
         expected_revision: revision,
         after_cursor: None,
-        limit: Some(200),
-        provenance: piko_protocol::HistoryProvenanceFilter::Facts,
+        limit: Some(400),
     });
     match host.command_result(command_id) {
-        CommandResult::SessionHistoryJournalPaged { page, .. } => page
-            .commits
-            .into_iter()
-            .flat_map(|commit| commit.events)
-            .map(|item| item.kind.0)
-            .collect(),
-        other => panic!("expected journal page, got {other:?}"),
+        CommandResult::SessionHistoryAgentStreamPaged { page, .. } => page,
+        other => panic!("expected agent stream page, got {other:?}"),
     }
 }
 
@@ -209,19 +205,27 @@ fn history_soak_survives_restart_without_journal_replay() {
 
     let before = history_overview(&mut host, &session_id, "overview-before");
     assert!(before.agents.len() >= 2);
-    assert!(
-        before.agents.iter().any(|agent| {
-            agent.parent_agent_instance_id.as_deref() == Some(root.as_str())
-                && agent.origin.is_some()
-        }),
-        "child origin is recorded"
+    let root_stream_before = agent_stream(
+        &mut host,
+        &session_id,
+        &root,
+        before.revision,
+        "stream-before",
     );
-    assert!(before.works.len() >= 3);
-    let kinds = journal_kinds(&mut host, &session_id, before.revision, "journal-before");
-    assert!(kinds.iter().any(|kind| kind == "input"));
-    assert!(kinds.iter().any(|kind| kind == "agent_origin"));
-    assert!(kinds.iter().any(|kind| kind == "compaction_recorded"));
-    assert!(kinds.iter().any(|kind| kind.contains("interrupt")));
+    assert!(
+        root_stream_before
+            .items
+            .iter()
+            .any(|item| item.kind.0 == "input"),
+        "root stream carries its inputs"
+    );
+    assert!(
+        root_stream_before
+            .items
+            .iter()
+            .any(|item| item.kind.0 == "model_step"),
+        "root stream carries model steps"
+    );
 
     let session_path = session_path_of(&mut host, &session_id, "list-before-restart");
     host.restart();
@@ -233,22 +237,35 @@ fn history_soak_survives_restart_without_journal_replay() {
 
     let after = history_overview(&mut host, &session_id, "overview-after");
     assert_eq!(after.revision, before.revision);
-    assert_eq!(after.works, before.works);
     assert_eq!(after.agents, before.agents);
-    let after_kinds = journal_kinds(&mut host, &session_id, after.revision, "journal-after");
-    assert_eq!(after_kinds, kinds);
+    let root_stream_after = agent_stream(
+        &mut host,
+        &session_id,
+        &root,
+        after.revision,
+        "stream-after",
+    );
+    assert_eq!(root_stream_after.items, root_stream_before.items);
 
-    host.send(Command::SessionHistoryTranscriptPageGet {
-        command_id: "transcript-after".into(),
-        session_id: session_id.clone(),
-        expected_revision: after.revision,
-        after_cursor: None,
-        limit: Some(200),
-    });
-    match host.command_result("transcript-after") {
-        CommandResult::SessionHistoryTranscriptPaged { page, .. } => {
-            assert!(!page.items.is_empty());
-        }
-        other => panic!("expected transcript page, got {other:?}"),
-    }
+    let child = after
+        .agents
+        .iter()
+        .find(|agent| agent.parent_agent_instance_id.as_deref() == Some(root.as_str()))
+        .map(|agent| agent.agent_instance_id.clone())
+        .expect("child agent after restart");
+    let child_stream = agent_stream(
+        &mut host,
+        &session_id,
+        &child,
+        after.revision,
+        "child-stream",
+    );
+    assert!(
+        child_stream
+            .items
+            .iter()
+            .all(|item| item.relation.agent_instance_id.as_deref() == Some(child.as_str())),
+        "child stream is per-agent isolated"
+    );
+    assert!(!child_stream.items.is_empty());
 }

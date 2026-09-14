@@ -30,7 +30,6 @@ pub(super) fn resolve(
                 | "model_step_committed"
                 | "usage_recorded"
                 | "agent_input_processing_finished_v1"
-                | "tree_entry_recorded"
                 | "agent_origin_recorded_v1"
         )
     {
@@ -39,6 +38,14 @@ pub(super) fn resolve(
             event.event_id
         )));
     }
+    let diagnostic = if matches!(
+        event.provenance,
+        piko_session_store::HistoryProvenance::Fact
+    ) {
+        joined_diagnostic(event, bundle)
+    } else {
+        None
+    };
     Ok(HistoryItemDetail {
         item_ref: item_ref.clone(),
         provenance: provenance(event),
@@ -50,7 +57,62 @@ pub(super) fn resolve(
             }
         },
         content,
+        diagnostic,
     })
+}
+
+/// Join one optional trajectory observation by persisted identity: assembly
+/// attaches to root work, model-step records to the step, and tool records to
+/// the tool call ID. Never nearest-time matching.
+fn joined_diagnostic(
+    event: &HistoryEvent,
+    bundle: &InspectionBundle,
+) -> Option<Box<piko_protocol::TrajectoryRecord>> {
+    let root = event.root_input_id.as_deref()?;
+    let run = bundle.trajectory.runs.get(root)?;
+    let is_tool_message = match (event.event_type.as_str(), event.entity_id.as_deref()) {
+        ("message_committed", Some(message_id)) => bundle
+            .current
+            .messages
+            .get(message_id)
+            .is_some_and(|stored| {
+                matches!(stored.data.message, piko_protocol::Message::ToolCall { .. })
+            }),
+        _ => false,
+    };
+    let call_id = if is_tool_message {
+        event.entity_id.as_deref().and_then(|message_id| {
+            match &bundle.current.messages.get(message_id)?.data.message {
+                piko_protocol::Message::ToolCall { id, .. } => Some(id.clone()),
+                _ => None,
+            }
+        })
+    } else {
+        None
+    };
+    // A call/step has started and finished records under one identity; the
+    // latest record carries the final status, duration, and result.
+    run.records
+        .iter()
+        .rev()
+        .find(|record| match record {
+            piko_protocol::TrajectoryRecord::ModelStep(value) => {
+                event.event_type == "model_step_committed"
+                    && event
+                        .entity_id
+                        .as_deref()
+                        .is_some_and(|id| value.step_id == id)
+            }
+            piko_protocol::TrajectoryRecord::ToolCall(value) => {
+                call_id.as_deref() == Some(value.call_id.as_str())
+            }
+            piko_protocol::TrajectoryRecord::Assembly(_) => {
+                event.event_type == "agent_input_admitted_v1"
+            }
+            _ => false,
+        })
+        .cloned()
+        .map(Box::new)
 }
 
 fn parse_ref(item_ref: &HistoryItemRef) -> Result<(u64, usize), ProtocolError> {
@@ -135,14 +197,8 @@ fn fact_content(event: &HistoryEvent, bundle: &InspectionBundle) -> Option<Histo
             .values()
             .filter_map(|input| input.processing.as_ref()?.report.as_ref())
             .find(|report| report.report_id == id)
-            .cloned()
-            .map(|report| HistoryItemContent::Report { report }),
-        "tree_entry_recorded" => bundle
-            .current
-            .tree_entries
-            .get(id)
-            .and_then(|stored| serde_json::from_value(stored.data.payload.clone()).ok())
-            .map(|entry| HistoryItemContent::TreeEntry { entry }),
+            .and_then(|report| serde_json::to_value(report).ok())
+            .map(|value| HistoryItemContent::Structured { value }),
         _ => event.transition.as_ref().and_then(|transition| {
             serde_json::to_value(transition)
                 .ok()

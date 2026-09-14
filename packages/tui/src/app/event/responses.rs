@@ -7,15 +7,17 @@ impl AppState {
         result: Result<piko_protocol::CommandResult, String>,
     ) -> Vec<Effect> {
         let mut effects = Vec::new();
-        let pending_history =
-            self.history.pending_command_id.as_deref() == Some(&response_command_id);
+        let pending_history = self
+            .history
+            .pending_commands
+            .iter()
+            .any(|id| id == &response_command_id);
         let is_history = matches!(
             &result,
             Ok(
                 piko_protocol::CommandResult::SessionHistoryOverviewGot { .. }
-                    | piko_protocol::CommandResult::SessionHistoryWorkPaged { .. }
-                    | piko_protocol::CommandResult::SessionHistoryJournalPaged { .. }
-                    | piko_protocol::CommandResult::SessionHistoryTranscriptPaged { .. }
+                    | piko_protocol::CommandResult::SessionHistoryAgentStreamPaged { .. }
+                    | piko_protocol::CommandResult::SessionHistoryLaneGot { .. }
                     | piko_protocol::CommandResult::SessionHistoryItemGot { .. }
                     | piko_protocol::CommandResult::HistoryRevisionChanged { .. }
             )
@@ -24,7 +26,9 @@ impl AppState {
             return effects;
         }
         if pending_history {
-            self.history.pending_command_id = None;
+            self.history
+                .pending_commands
+                .retain(|id| id != &response_command_id);
             self.history.loading = false;
             if let Err(error) = &result {
                 if self.history.detail_loading {
@@ -109,27 +113,44 @@ impl AppState {
                 }
             },
             Ok(piko_protocol::CommandResult::SessionHistoryOverviewGot { overview, .. }) => {
-                let count = overview.works.len();
+                let count = overview.agents.len();
                 self.history.set_overview(overview);
-                self.status = format!("{count} historical work item(s)");
+                // Auto-select the default agent and load its stream + lane.
+                let agent = crate::features::history::rows::default_agent_id(
+                    &self.history.overview.as_ref().unwrap().agents,
+                );
+                if let Some(agent_id) = agent {
+                    if self.history.agent_id.as_deref() != Some(agent_id.as_str()) {
+                        self.history.select_agent(agent_id);
+                    }
+                    effects.extend(self.fetch_history_agent());
+                }
+                self.status = format!("{count} agent stream(s)");
             }
-            Ok(piko_protocol::CommandResult::SessionHistoryWorkPaged { page, .. }) => {
+            Ok(piko_protocol::CommandResult::SessionHistoryAgentStreamPaged { page, .. }) => {
                 let count = page.items.len();
-                self.history.set_work(page);
-                self.status = format!("{count} history item(s)");
+                self.history.set_stream(page);
+                self.status = format!("{count} trajectory row(s)");
             }
-            Ok(piko_protocol::CommandResult::SessionHistoryJournalPaged { page, .. }) => {
-                let count = page.commits.len();
-                self.history.set_journal(page);
-                self.status = format!("{count} journal commit(s)");
-            }
-            Ok(piko_protocol::CommandResult::SessionHistoryTranscriptPaged { page, .. }) => {
-                let count = page.items.len();
-                self.history.set_transcript(page);
-                self.status = format!("{count} transcript item(s)");
+            Ok(piko_protocol::CommandResult::SessionHistoryLaneGot { summary, .. }) => {
+                self.history.set_lanes(summary);
+                self.status = "lane strip".into();
             }
             Ok(piko_protocol::CommandResult::SessionHistoryItemGot { detail, .. }) => {
-                self.history.set_detail(detail);
+                // The selection may have moved while this was in flight.
+                if let Some(queued) = self.history.detail_queued.take()
+                    && queued != detail.item_ref
+                {
+                    self.history.cache_detail(detail);
+                    self.history.detail_loading = false;
+                    effects.extend(self.history_request(Command::SessionHistoryItemGet {
+                        command_id: command_id(),
+                        session_id: self.history.session_id.clone().unwrap_or_default(),
+                        item_ref: queued,
+                    }));
+                } else {
+                    self.history.set_detail(detail);
+                }
                 self.status = "history detail".into();
             }
             Ok(piko_protocol::CommandResult::SessionCreated {

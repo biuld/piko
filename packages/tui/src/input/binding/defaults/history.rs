@@ -4,13 +4,6 @@ use super::*;
 pub(super) fn rules() -> Vec<BindingRule> {
     vec![
         rule!(
-            "default-history-inspect",
-            "i",
-            HistoryInspect,
-            History,
-            ["!text.inputActive"]
-        ),
-        rule!(
             "default-history-refresh",
             "r",
             HistoryRefresh,
@@ -32,27 +25,27 @@ pub(super) fn rules() -> Vec<BindingRule> {
             ["!text.inputActive"]
         ),
         rule!(
-            "default-history-facts",
+            "default-history-detail-tab",
+            "t",
+            HistoryDetailTab,
+            History,
+            ["!text.inputActive"]
+        ),
+        rule!(
+            "default-history-agent-next",
             "a",
-            HistoryFactsOnly,
+            HistoryAgentNext,
             History,
             ["!text.inputActive"]
         ),
         rule!(
-            "default-history-diagnostics",
-            "d",
-            HistoryDiagnostics,
-            History,
-            ["!text.inputActive"]
-        ),
-        rule!(
-            "default-history-lens-next",
+            "default-history-page-next",
             "tab",
             SelectionPageNext,
             History
         ),
         rule!(
-            "default-history-lens-prev",
+            "default-history-page-prev",
             "shift+tab",
             SelectionPagePrevious,
             History

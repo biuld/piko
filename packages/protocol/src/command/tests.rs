@@ -203,32 +203,27 @@ fn session_history_commands_round_trip() {
     assert_eq!(json["type"], "session_history_overview_get");
     assert_eq!(serde_json::from_value::<Command>(json).unwrap(), overview);
 
-    let journal: Command = serde_json::from_value(serde_json::json!({
-        "type": "session_history_journal_page_get",
-        "command_id": "history-2",
-        "session_id": "s1",
-        "expected_revision": 42
-    }))
-    .unwrap();
-    assert!(matches!(
-        journal,
-        Command::SessionHistoryJournalPageGet {
-            provenance: crate::HistoryProvenanceFilter::All,
-            expected_revision: 42,
-            ..
-        }
-    ));
-
-    let transcript = Command::SessionHistoryTranscriptPageGet {
-        command_id: "history-3".into(),
+    let stream = Command::SessionHistoryAgentStreamGet {
+        command_id: "history-2".into(),
         session_id: "s1".into(),
-        expected_revision: 7,
+        agent_instance_id: "agent_s1_root".into(),
+        expected_revision: 42,
         after_cursor: None,
         limit: Some(50),
     };
-    let json = serde_json::to_value(&transcript).unwrap();
-    assert_eq!(json["type"], "session_history_transcript_page_get");
-    assert_eq!(serde_json::from_value::<Command>(json).unwrap(), transcript);
+    let json = serde_json::to_value(&stream).unwrap();
+    assert_eq!(json["type"], "session_history_agent_stream_get");
+    assert_eq!(serde_json::from_value::<Command>(json).unwrap(), stream);
+
+    let lane = Command::SessionHistoryLaneGet {
+        command_id: "history-3".into(),
+        session_id: "s1".into(),
+        agent_instance_id: "agent_s1_root".into(),
+        expected_revision: 7,
+    };
+    let json = serde_json::to_value(&lane).unwrap();
+    assert_eq!(json["type"], "session_history_lane_get");
+    assert_eq!(serde_json::from_value::<Command>(json).unwrap(), lane);
 }
 
 #[test]

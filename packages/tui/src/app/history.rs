@@ -8,25 +8,19 @@ impl AppState {
         match &mut command {
             Command::SessionList { command_id, .. }
             | Command::SessionHistoryOverviewGet { command_id, .. }
-            | Command::SessionHistoryWorkPageGet { command_id, .. }
-            | Command::SessionHistoryJournalPageGet { command_id, .. }
-            | Command::SessionHistoryTranscriptPageGet { command_id, .. }
+            | Command::SessionHistoryAgentStreamGet { command_id, .. }
+            | Command::SessionHistoryLaneGet { command_id, .. }
             | Command::SessionHistoryItemGet { command_id, .. } => {
                 command_id.insert_str(0, "history:")
             }
             _ => unreachable!("history query command"),
         }
-        self.history.pending_command_id = Some(command.command_id().to_string());
+        self.history
+            .pending_commands
+            .push(command.command_id().to_string());
         if matches!(command, Command::SessionHistoryItemGet { .. }) {
             self.history.detail_loading = true;
             self.history.detail_error = None;
-            self.history.active_pane = crate::ui::components::split_pane::PaneSide::Second;
-            self.history.opened_row = self
-                .history
-                .visible_rows()
-                .get(self.history.selected)
-                .cloned();
-            self.history.detail = None;
         } else {
             self.history.loading = true;
             self.history.error = None;
@@ -40,118 +34,116 @@ impl AppState {
         };
         self.history.begin(session_id.clone());
         self.push_surface(SurfaceId::History);
-        self.status = format!("loading history for {session_id}");
+        self.status = format!("loading trajectory for {session_id}");
         self.history_request(Command::SessionHistoryOverviewGet {
             command_id: command_id(),
             session_id,
             after_cursor: None,
-            limit: Some(100),
+            limit: None,
         })
     }
 
-    pub(super) fn cycle_history_lens(&mut self, action: SurfaceAction) -> Vec<Effect> {
-        if self.history.choosing_session {
-            return Vec::new();
-        }
-        let backwards = matches!(action, SurfaceAction::HistoryLensPrevious);
-        let lens = self.history.cycle_lens(backwards);
-        self.history_fetch_lens(lens)
-    }
-
-    pub(super) fn select_history_lens(&mut self, index: usize) -> Vec<Effect> {
-        if self.history.choosing_session {
-            return Vec::new();
-        }
-        let lens = self.history.select_lens(index);
-        self.history_fetch_lens(lens)
-    }
-
-    fn history_fetch_lens(&mut self, lens: crate::features::history::HistoryLens) -> Vec<Effect> {
-        use crate::features::history::HistoryLens;
+    /// Fetch the selected agent's stream and lane strip at the overview's
+    /// published revision.
+    pub(super) fn fetch_history_agent(&mut self) -> Vec<Effect> {
         let (Some(session_id), Some(overview)) = (
             self.history.session_id.clone(),
             self.history.overview.as_ref(),
         ) else {
             return Vec::new();
         };
-        match lens {
-            HistoryLens::Journal if self.history.journal.is_none() => {
-                self.history_request(Command::SessionHistoryJournalPageGet {
-                    command_id: command_id(),
-                    session_id,
-                    expected_revision: overview.revision,
-                    after_cursor: None,
-                    limit: Some(100),
-                    provenance: self.history.provenance,
-                })
-            }
-            HistoryLens::Transcript if self.history.transcript.is_none() => {
-                self.history_request(Command::SessionHistoryTranscriptPageGet {
-                    command_id: command_id(),
-                    session_id,
-                    expected_revision: overview.revision,
-                    after_cursor: None,
-                    limit: Some(100),
-                })
-            }
-            _ => Vec::new(),
-        }
+        let Some(agent_id) = self.history.agent_id.clone() else {
+            return Vec::new();
+        };
+        let revision = overview.revision;
+        let mut effects = self.history_request(Command::SessionHistoryAgentStreamGet {
+            command_id: command_id(),
+            session_id: session_id.clone(),
+            agent_instance_id: agent_id.clone(),
+            expected_revision: revision,
+            after_cursor: None,
+            limit: Some(100),
+        });
+        effects.extend(self.history_request(Command::SessionHistoryLaneGet {
+            command_id: command_id(),
+            session_id,
+            agent_instance_id: agent_id,
+            expected_revision: revision,
+        }));
+        effects
     }
 
-    pub(super) fn refetch_history_journal(&mut self) -> Vec<Effect> {
-        self.history.journal = None;
-        if self.history.lens == crate::features::history::HistoryLens::Journal {
-            self.history_fetch_lens(crate::features::history::HistoryLens::Journal)
-        } else {
-            Vec::new()
+    pub(super) fn select_history_agent(&mut self, index: usize) -> Vec<Effect> {
+        if self.history.choosing_session {
+            return Vec::new();
         }
+        let Some(agent) = self
+            .history
+            .overview
+            .as_ref()
+            .and_then(|overview| overview.agents.get(index))
+        else {
+            return Vec::new();
+        };
+        self.history.agent_choosing = false;
+        if self.history.agent_id.as_deref() == Some(agent.agent_instance_id.as_str()) {
+            return Vec::new();
+        }
+        self.history.select_agent(agent.agent_instance_id.clone());
+        self.fetch_history_agent()
+    }
+
+    /// `a`: rotate to the next agent stream in overview order.
+    pub(super) fn cycle_history_agent(&mut self) -> Vec<Effect> {
+        let Some(overview) = self.history.overview.as_ref() else {
+            return Vec::new();
+        };
+        if overview.agents.is_empty() {
+            return Vec::new();
+        }
+        let current = overview
+            .agents
+            .iter()
+            .position(|agent| Some(&agent.agent_instance_id) == self.history.agent_id.as_ref());
+        let next = current
+            .map(|index| (index + 1) % overview.agents.len())
+            .unwrap_or(0);
+        self.select_history_agent(next)
     }
 
     pub(super) fn dispatch_history(&mut self, action: SurfaceAction) -> Vec<Effect> {
         match action {
-            SurfaceAction::HistoryInspect => {
-                self.history.inspect_summary();
-                Vec::new()
-            }
             SurfaceAction::OpenHistory(requested) => self.open_history(requested),
-            action @ (SurfaceAction::HistoryFilter
-            | SurfaceAction::HistoryFactsOnly
-            | SurfaceAction::HistoryDiagnostics) => self.filter_history(action),
-            action @ (SurfaceAction::HistoryLensPrevious | SurfaceAction::HistoryLensNext) => {
-                self.cycle_history_lens(action)
-            }
-            SurfaceAction::HistoryRefresh => self.open_history(self.history.session_id.clone()),
-            SurfaceAction::HistoryChooseSession => self.choose_history_session(),
-            SurfaceAction::HistorySelectLens(index) => self.select_history_lens(index),
-            _ => Vec::new(),
-        }
-    }
-
-    pub(super) fn filter_history(&mut self, action: SurfaceAction) -> Vec<Effect> {
-        if self.history.detail_loading {
-            self.history.pending_command_id = None;
-        }
-        self.history.clear_detail();
-        self.history.selected = 0;
-        match action {
             SurfaceAction::HistoryFilter => {
                 self.history.filter_editing = true;
+                self.history.clear_detail();
+                self.history.pending_commands.clear();
                 Vec::new()
             }
-            SurfaceAction::HistoryFactsOnly | SurfaceAction::HistoryDiagnostics => {
-                let requested = if matches!(action, SurfaceAction::HistoryFactsOnly) {
-                    piko_protocol::HistoryProvenanceFilter::Facts
+            SurfaceAction::HistorySelectAgent(index) => {
+                if index == usize::MAX {
+                    self.cycle_history_agent()
                 } else {
-                    piko_protocol::HistoryProvenanceFilter::Diagnostics
-                };
-                self.history.provenance = if self.history.provenance == requested {
-                    piko_protocol::HistoryProvenanceFilter::All
+                    self.select_history_agent(index)
+                }
+            }
+            SurfaceAction::HistoryDetailTab(index) => {
+                if index == usize::MAX {
+                    self.history.cycle_detail_tab();
                 } else {
-                    requested
-                };
-                self.history.pending_command_id = None;
-                self.history.loading = false;
-                self.refetch_history_journal()
+                    self.history.select_detail_tab(index);
+                }
+                Vec::new()
+            }
+            SurfaceAction::HistoryRefresh => self.open_history(self.history.session_id.clone()),
+            SurfaceAction::HistoryChooseSession => {
+                if self.history.overview.is_some() && !self.history.choosing_session {
+                    // Inside an inspected session, `s` opens the agent selector.
+                    self.history.start_agent_choosing();
+                    Vec::new()
+                } else {
+                    self.choose_history_session()
+                }
             }
             _ => Vec::new(),
         }
@@ -169,12 +161,12 @@ impl AppState {
     }
 
     pub(super) fn history_next_page(&mut self) -> Vec<Effect> {
-        use crate::features::history::HistoryLens;
         if self.history.loading
             || self.history.detail_loading
             || self.history.error.is_some()
             || self.history.active_pane == crate::ui::components::split_pane::PaneSide::Second
             || self.history.choosing_session
+            || self.history.agent_choosing
             || self.history.shows_detail_only()
             || self.history.selected.saturating_add(3) < self.history.row_count()
         {
@@ -183,71 +175,19 @@ impl AppState {
         let Some(overview) = &self.history.overview else {
             return Vec::new();
         };
-        let session_id = overview.session_id.clone();
-        let expected_revision = overview.revision;
-        let command_id = command_id();
-        let command = match self.history.lens {
-            HistoryLens::Work | HistoryLens::Agents if self.history.work.is_some() => {
-                let page = self.history.work.as_ref().unwrap();
-                let Some(cursor) = page.next_cursor.clone() else {
-                    return Vec::new();
-                };
-                Command::SessionHistoryWorkPageGet {
-                    command_id,
-                    session_id,
-                    expected_revision,
-                    root_input_id: page.root_input_id.clone(),
-                    after_cursor: Some(cursor),
-                    limit: Some(100),
-                }
-            }
-            HistoryLens::Work | HistoryLens::Agents => {
-                let Some(cursor) = overview.next_cursor.clone() else {
-                    return Vec::new();
-                };
-                Command::SessionHistoryOverviewGet {
-                    command_id,
-                    session_id,
-                    after_cursor: Some(cursor),
-                    limit: Some(100),
-                }
-            }
-            HistoryLens::Journal => {
-                let Some(cursor) = self
-                    .history
-                    .journal
-                    .as_ref()
-                    .and_then(|page| page.next_cursor.clone())
-                else {
-                    return Vec::new();
-                };
-                Command::SessionHistoryJournalPageGet {
-                    command_id,
-                    session_id,
-                    expected_revision,
-                    after_cursor: Some(cursor),
-                    limit: Some(100),
-                    provenance: self.history.provenance,
-                }
-            }
-            HistoryLens::Transcript => {
-                let Some(cursor) = self
-                    .history
-                    .transcript
-                    .as_ref()
-                    .and_then(|page| page.next_cursor.clone())
-                else {
-                    return Vec::new();
-                };
-                Command::SessionHistoryTranscriptPageGet {
-                    command_id,
-                    session_id,
-                    expected_revision,
-                    after_cursor: Some(cursor),
-                    limit: Some(100),
-                }
-            }
+        let Some(page) = self.history.stream.as_ref() else {
+            return Vec::new();
         };
-        self.history_request(command)
+        let Some(cursor) = page.next_cursor.clone() else {
+            return Vec::new();
+        };
+        self.history_request(Command::SessionHistoryAgentStreamGet {
+            command_id: command_id(),
+            session_id: page.session_id.clone(),
+            agent_instance_id: page.agent_instance_id.clone(),
+            expected_revision: overview.revision,
+            after_cursor: Some(cursor),
+            limit: Some(100),
+        })
     }
 }

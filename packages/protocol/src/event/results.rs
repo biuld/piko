@@ -53,16 +53,12 @@ pub enum CommandResult {
         session_id: SessionId,
         current_revision: u64,
     },
-    SessionHistoryWorkPaged {
-        page: crate::HistoryWorkPage,
+    SessionHistoryAgentStreamPaged {
+        page: crate::HistoryStreamPage,
         timestamp: i64,
     },
-    SessionHistoryJournalPaged {
-        page: crate::HistoryJournalPage,
-        timestamp: i64,
-    },
-    SessionHistoryTranscriptPaged {
-        page: crate::HistoryTranscriptPage,
+    SessionHistoryLaneGot {
+        summary: crate::HistoryLaneSummary,
         timestamp: i64,
     },
     SessionHistoryItemGot {

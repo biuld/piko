@@ -15,7 +15,7 @@ pub enum LocalCommandId {
     Models,
     Agents,
     Diff,
-    History,
+    Trajectory,
     Quit,
 }
 
@@ -90,10 +90,10 @@ const LOCAL: &[(&str, LocalCommandId, &str, &str)] = &[
         "Show workspace diff for the last or active input",
     ),
     (
-        "/history",
-        LocalCommandId::History,
-        "Session history",
-        "Inspect journal-derived session history without opening it",
+        "/trajectory",
+        LocalCommandId::Trajectory,
+        "Session trajectory",
+        "Inspect a journal-derived session trajectory without opening it",
     ),
     ("/quit", LocalCommandId::Quit, "Quit", "Exit the TUI"),
 ];
@@ -153,7 +153,7 @@ pub fn action_for_local_command(id: LocalCommandId) -> Action {
         LocalCommandId::Usage => SurfaceAction::OpenUsage.into(),
         LocalCommandId::Notifications => SurfaceAction::OpenNotifications.into(),
         LocalCommandId::Diff => SlashAction::RequestDiff.into(),
-        LocalCommandId::History => SurfaceAction::OpenHistory(None).into(),
+        LocalCommandId::Trajectory => SurfaceAction::OpenHistory(None).into(),
         LocalCommandId::Quit => AppAction::Quit.into(),
     }
 }

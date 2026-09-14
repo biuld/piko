@@ -1,7 +1,7 @@
-//! Structured, scrollable bodies for persisted messages and tree entries.
+//! Structured, scrollable bodies for persisted messages.
 use super::paint::{plain, wrapped};
 use crate::theme::Theme;
-use piko_protocol::{ContentBlock, Message, MessageContent, SessionTreeEntry};
+use piko_protocol::{ContentBlock, Message, MessageContent};
 use ratatui::text::Line;
 
 pub(super) fn section(label: &str, body: &str, theme: &Theme, width: u16) -> Vec<Line<'static>> {
@@ -128,41 +128,5 @@ pub(super) fn message_lines(message: &Message, theme: &Theme, width: u16) -> Vec
             lines.extend(section("Tool call ID", tool_call_id, theme, width));
             lines
         }
-    }
-}
-
-pub(super) fn tree_lines(
-    entry: &SessionTreeEntry,
-    theme: &Theme,
-    width: u16,
-) -> Vec<Line<'static>> {
-    match entry {
-        SessionTreeEntry::Message(entry) => {
-            let mut lines = message_lines(&entry.message, theme, width);
-            lines.extend(section("Message", &entry.id, theme, width));
-            lines.extend(section("Agent", &entry.agent_instance_id, theme, width));
-            lines.extend(section("Root input", &entry.root_input_id, theme, width));
-            if let Some(parent) = &entry.parent_id {
-                lines.extend(section("Parent", parent, theme, width));
-            }
-            lines
-        }
-        SessionTreeEntry::ToolCall(entry) => {
-            let mut lines = section("Tool call", &entry.tool_name, theme, width);
-            lines.extend(fields(&entry.arguments, theme, width));
-            lines.extend(section("Call ID", &entry.tool_call_id, theme, width));
-            lines
-        }
-        SessionTreeEntry::Compaction(entry) => {
-            section("Compaction summary", &entry.summary, theme, width)
-        }
-        SessionTreeEntry::BranchSummary(entry) => {
-            section("Branch summary", &entry.summary, theme, width)
-        }
-        other => fields(
-            &serde_json::to_value(other).unwrap_or_default(),
-            theme,
-            width,
-        ),
     }
 }

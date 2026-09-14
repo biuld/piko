@@ -1,48 +1,135 @@
-use piko_protocol::{
-    AgentWorkOutcome, HistoryAvailability, HistoryItemContent, HistoryItemDetail,
-    HistoryProvenance, TrajectoryRecord, Usage,
-};
+use piko_protocol::{HistoryAvailability, HistoryItemContent, HistoryItemDetail};
 
-use super::content::{fields, message_content, message_lines, section, tree_lines};
-use super::labels::{
-    block_kind_word, origin_word, outcome_color, outcome_word, step_outcome_word, terminal_word,
-    tool_status_word,
-};
-use super::paint::{kv, plain, wrapped};
+use super::super::{DetailTab, HistoryRow};
+use super::content::{fields, message_content, message_lines, section};
+use super::context::row_context;
+use super::labels::{step_outcome_word, terminal_word, tool_status_word};
+use super::paint::{field_lines, kv, plain, wrapped};
 use crate::theme::Theme;
 use ratatui::text::Line;
 
-pub(crate) fn detail_lines(
-    detail: &HistoryItemDetail,
+/// Lines for one detail tab. Tabs with no recorded content explain their
+/// absence instead of rendering empty space.
+pub(crate) fn tab_lines(
+    tab: DetailTab,
+    detail: Option<&HistoryItemDetail>,
+    row: Option<&HistoryRow>,
     theme: &Theme,
     width: u16,
 ) -> Vec<Line<'static>> {
-    let mut lines = vec![header_line(detail, theme, width)];
-    match &detail.availability {
-        HistoryAvailability::Unavailable { reason } => {
-            lines.push(plain("unavailable", theme.warning, width));
-            lines.extend(wrapped(reason, theme.muted, width));
-            return lines;
-        }
-        HistoryAvailability::Available => {}
+    match tab {
+        DetailTab::Summary => summary_lines(detail, row, theme, width),
+        DetailTab::Payload => payload_lines(detail, row, theme, width),
+        DetailTab::Result => result_lines(detail, row, theme, width),
+        DetailTab::Timing => timing_lines(detail, row, theme, width),
     }
-    lines.push(plain(
-        format!("Snapshot revision {}", detail.item_ref.revision),
-        theme.muted,
-        width,
-    ));
-    lines.push(plain("", theme.text, width));
-    match detail.content.as_ref() {
+}
+
+fn unavailable(theme: &Theme, width: u16, reason: &str) -> Vec<Line<'static>> {
+    let mut lines = vec![plain("unavailable", theme.warning, width)];
+    lines.extend(wrapped(reason, theme.muted, width));
+    lines
+}
+
+fn summary_lines(
+    detail: Option<&HistoryItemDetail>,
+    row: Option<&HistoryRow>,
+    theme: &Theme,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if let Some(row) = row {
+        lines.extend(row_context(row, theme, width));
+        if let HistoryRow::Stream(item) = row {
+            lines.push(Line::from(""));
+            lines.push(plain("Journal", theme.muted, width));
+            lines.extend(field_lines(
+                "Position",
+                format!("revision {} · event {}", item.revision, item.event_index),
+                theme,
+                width,
+            ));
+            lines.extend(field_lines(
+                "Committed",
+                timestamp(item.committed_at),
+                theme,
+                width,
+            ));
+        }
+        lines.push(Line::from(""));
+    }
+    match detail {
+        Some(detail) => {
+            lines.extend(field_lines(
+                "Snapshot",
+                format!("revision {}", detail.item_ref.revision),
+                theme,
+                width,
+            ));
+            match &detail.availability {
+                HistoryAvailability::Unavailable { reason } => {
+                    lines.extend(unavailable(theme, width, reason));
+                }
+                HistoryAvailability::Available => {}
+            }
+            if let Some(HistoryItemContent::ModelStep { boundary }) = detail.content.as_ref() {
+                lines.push(kv(
+                    "outcome",
+                    step_outcome_word(boundary.outcome),
+                    theme,
+                    width,
+                ));
+                lines.push(kv(
+                    "step",
+                    // 1-based; matches the step id suffix (`step_6`).
+                    boundary.step_index.to_string(),
+                    theme,
+                    width,
+                ));
+                lines.extend(section(
+                    "Ordered tool declarations",
+                    &boundary.tool_call_message_ids.join("\n"),
+                    theme,
+                    width,
+                ));
+            }
+        }
+        None => lines.extend(wrapped(
+            "Open the row to inspect its recorded detail.",
+            theme.muted,
+            width,
+        )),
+    }
+    lines
+}
+
+fn origin_role(origin: &piko_protocol::AgentInputOrigin) -> &'static str {
+    match origin {
+        piko_protocol::AgentInputOrigin::User => "user",
+        piko_protocol::AgentInputOrigin::Agent => "agent",
+        piko_protocol::AgentInputOrigin::System => "system",
+    }
+}
+
+fn payload_lines(
+    detail: Option<&HistoryItemDetail>,
+    row: Option<&HistoryRow>,
+    theme: &Theme,
+    width: u16,
+) -> Vec<Line<'static>> {
+    if let Some(detail) = detail
+        && let Some(lines) = super::tool::tool_call_card(detail, false, theme, width)
+    {
+        return lines;
+    }
+    let mut lines = Vec::new();
+    match detail.and_then(|detail| detail.content.as_ref()) {
         Some(HistoryItemContent::Input { input }) => {
-            lines.push(plain(origin_word(input.origin), theme.accent_user, width));
+            lines.push(plain(origin_role(&input.origin), theme.accent_user, width));
             lines.extend(message_content(&input.content, theme, width));
         }
-        Some(HistoryItemContent::Message {
-            message_id,
-            message,
-        }) => {
+        Some(HistoryItemContent::Message { message, .. }) => {
             lines.extend(message_lines(message, theme, width));
-            lines.extend(section("Message ID", message_id, theme, width));
         }
         Some(HistoryItemContent::ModelStep { boundary }) => {
             lines.extend(section(
@@ -57,148 +144,107 @@ pub(crate) fn detail_lines(
                 theme,
                 width,
             ));
-            lines.extend(section(
-                "Ordered tool declarations",
-                &boundary.tool_call_message_ids.join("\n"),
-                theme,
-                width,
-            ));
-            lines.push(kv(
-                "outcome",
-                step_outcome_word(boundary.outcome),
-                theme,
-                width,
-            ));
-            lines.push(kv(
-                "step",
-                (boundary.step_index + 1).to_string(),
-                theme,
-                width,
-            ));
-            if let Some(clock) = super::labels::format_clock(boundary.started_at) {
-                lines.push(kv("started", clock, theme, width));
-            }
-        }
-        Some(HistoryItemContent::Usage { usage }) => {
-            lines.extend(usage_lines(usage, theme, width));
-        }
-        Some(HistoryItemContent::Report { report }) => {
-            lines.push(plain(
-                outcome_word(report.outcome.status()),
-                outcome_color(report.outcome.status(), theme),
-                width,
-            ));
-            if !report.summary.is_empty() {
-                lines.extend(wrapped(&report.summary, theme.text, width));
-            }
-            if let AgentWorkOutcome::Failed { error } = &report.outcome {
-                lines.extend(wrapped(error, theme.error, width));
-            }
-            lines.extend(usage_lines(&report.usage, theme, width));
-        }
-        Some(HistoryItemContent::TreeEntry { entry }) => {
-            lines.extend(tree_lines(entry, theme, width));
-        }
-        Some(HistoryItemContent::PromptAssembly { assembly }) => {
-            lines.push(kv(
-                "blocks",
-                assembly.prompt.blocks.len().to_string(),
-                theme,
-                width,
-            ));
-            lines.push(kv(
-                "tools",
-                assembly.tool_catalog.tools.len().to_string(),
-                theme,
-                width,
-            ));
-            lines.extend(section("Digest", &assembly.prompt_digest, theme, width));
-            for block in &assembly.prompt.blocks {
-                let label = format!("{} · {}", block_kind_word(block.kind), block.source.locator);
-                lines.extend(section(&label, &block.content, theme, width));
-                let mut metadata = serde_json::to_value(block).unwrap_or_default();
-                if let Some(object) = metadata.as_object_mut() {
-                    object.remove("content");
-                }
-                lines.extend(fields(&metadata, theme, width));
-            }
-            lines.push(plain("Recorded tool catalog", theme.accent, width));
-            lines.extend(fields(
-                &serde_json::to_value(&assembly.tool_catalog).unwrap_or_default(),
-                theme,
-                width,
-            ));
-        }
-        Some(HistoryItemContent::DiagnosticRecord { record }) => {
-            lines.extend(diagnostic_lines(record, theme, width));
         }
         Some(HistoryItemContent::Structured { value }) => {
-            lines.push(plain("Recorded fields", theme.muted, width));
             lines.extend(fields(value, theme, width));
         }
-        None => lines.push(plain(
-            "No structured body for this item.",
-            theme.muted,
-            width,
-        )),
+        _ => lines.extend(absent_copy(detail, row, theme, width)),
     }
     lines
 }
 
-fn header_line(detail: &HistoryItemDetail, theme: &Theme, width: u16) -> Line<'static> {
-    let provenance = match detail.provenance {
-        HistoryProvenance::Fact => "fact",
-        HistoryProvenance::Diagnostic => "diagnostic",
-    };
-    let title = detail.content.as_ref().map(content_kind).unwrap_or("Item");
-    plain(format!("{title} · {provenance}"), theme.accent, width)
-}
-
-fn content_kind(content: &HistoryItemContent) -> &'static str {
-    match content {
-        HistoryItemContent::Input { .. } => "Input",
-        HistoryItemContent::Message { .. } => "Message",
-        HistoryItemContent::ModelStep { .. } => "Model step",
-        HistoryItemContent::Usage { .. } => "Usage",
-        HistoryItemContent::Report { .. } => "Outcome",
-        HistoryItemContent::TreeEntry { .. } => "Transcript",
-        HistoryItemContent::PromptAssembly { .. } => "Prompt assembly",
-        HistoryItemContent::DiagnosticRecord { .. } => "Diagnostic",
-        HistoryItemContent::Structured { .. } => "Item",
+fn result_lines(
+    detail: Option<&HistoryItemDetail>,
+    row: Option<&HistoryRow>,
+    theme: &Theme,
+    width: u16,
+) -> Vec<Line<'static>> {
+    if let Some(detail) = detail
+        && let Some(lines) = super::tool::tool_call_card(detail, true, theme, width)
+    {
+        return lines;
     }
-}
-
-fn usage_lines(usage: &Usage, theme: &Theme, width: u16) -> Vec<Line<'static>> {
-    fields(
-        &serde_json::to_value(usage).unwrap_or_default(),
-        theme,
-        width,
-    )
-}
-
-fn diagnostic_lines(record: &TrajectoryRecord, theme: &Theme, width: u16) -> Vec<Line<'static>> {
-    match record {
-        TrajectoryRecord::Assembly(record) => vec![kv(
-            "assembly",
-            format!(
-                "v{} · {} blocks",
-                record.assembly_version,
-                record.prompt.blocks.len()
-            ),
+    if let Some(HistoryItemContent::Message {
+        message:
+            piko_protocol::Message::ToolResult {
+                tool_name,
+                content,
+                is_error,
+                details,
+                ..
+            },
+        ..
+    }) = detail.and_then(|detail| detail.content.as_ref())
+    {
+        let mut lines = section(
+            "Tool result",
+            tool_name.as_deref().unwrap_or("tool"),
             theme,
             width,
-        )],
-        TrajectoryRecord::ModelStep(record) => {
-            let mut lines = vec![kv(
+        );
+        if *is_error == Some(true) {
+            lines.push(plain("Failed", theme.error, width));
+        }
+        lines.extend(super::content::block_lines(content, theme, width));
+        if let Some(details) = details {
+            lines.push(plain("Recorded result details", theme.accent, width));
+            lines.extend(fields(details, theme, width));
+        }
+        return lines;
+    }
+    if let Some(piko_protocol::TrajectoryRecord::ToolCall(value)) =
+        detail.and_then(|detail| detail.diagnostic.as_deref())
+    {
+        let mut lines = section(
+            "Tool observation",
+            &format!("{} · {}", value.tool_name, tool_status_word(value.status)),
+            theme,
+            width,
+        );
+        if let Some(error) = &value.error {
+            lines.extend(section("Error", error, theme, width));
+        }
+        if let Some(result) = &value.result {
+            lines.push(plain("Result", theme.accent, width));
+            lines.extend(fields(result, theme, width));
+        }
+        return lines;
+    }
+    absent_copy(detail, row, theme, width)
+}
+
+fn timing_lines(
+    detail: Option<&HistoryItemDetail>,
+    row: Option<&HistoryRow>,
+    theme: &Theme,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let record = detail.and_then(|detail| detail.diagnostic.as_deref());
+    match record {
+        Some(piko_protocol::TrajectoryRecord::ModelStep(value)) => {
+            lines.push(kv(
                 "model",
-                format!("{} / {}", record.provider, record.model),
+                format!("{} / {}", value.provider, value.model),
                 theme,
                 width,
-            )];
-            if let Some(duration) = record.duration_ms {
-                lines.push(kv("duration", format!("{duration} ms"), theme, width));
+            ));
+            lines.extend(clock_lines(
+                Some(value.started_at),
+                value.finished_at,
+                value.duration_ms,
+                theme,
+                width,
+            ));
+            for retry in &value.retries {
+                lines.extend(section(
+                    &format!("Retry {} · {} ms", retry.attempt, retry.delay_ms),
+                    &retry.error,
+                    theme,
+                    width,
+                ));
             }
-            if let Some(fallback) = &record.fallback {
+            if let Some(fallback) = &value.fallback {
                 lines.extend(section(
                     "Fallback",
                     &format!(
@@ -213,61 +259,93 @@ fn diagnostic_lines(record: &TrajectoryRecord, theme: &Theme, width: u16) -> Vec
                     width,
                 ));
             }
-            for retry in &record.retries {
-                lines.extend(section(
-                    &format!("Retry {} · {} ms", retry.attempt, retry.delay_ms),
-                    &retry.error,
-                    theme,
-                    width,
-                ));
-            }
-            if !record.retries.is_empty() {
-                lines.push(kv(
-                    "retries",
-                    record.retries.len().to_string(),
-                    theme,
-                    width,
-                ));
-            }
-            for (label, value) in [
-                ("Request", Some(&record.request)),
-                ("Options", Some(&record.options)),
-                ("Response", record.response.as_ref()),
-            ] {
-                if let Some(value) = value {
-                    lines.push(plain(label, theme.accent, width));
-                    lines.extend(fields(value, theme, width));
-                }
-            }
             lines
         }
-        TrajectoryRecord::ToolCall(record) => {
-            let mut lines = section(
-                "Tool observation",
-                &format!("{} · {}", record.tool_name, tool_status_word(record.status)),
+        Some(piko_protocol::TrajectoryRecord::ToolCall(value)) => {
+            lines.extend(clock_lines(
+                Some(value.started_at),
+                value.finished_at,
+                value.duration_ms,
                 theme,
                 width,
-            );
-            if let Some(error) = &record.error {
-                lines.extend(section("Error", error, theme, width));
-            }
-            for (label, value) in [("Arguments", &record.arguments), ("Result", &record.result)] {
-                if let Some(value) = value {
-                    lines.push(plain(label, theme.accent, width));
-                    lines.extend(fields(value, theme, width));
-                }
-            }
-            lines.extend(section("Call ID", &record.call_id, theme, width));
+            ));
             lines
         }
-        TrajectoryRecord::ChildRun(record) => {
-            section("Child agent", &record.child_agent_instance_id, theme, width)
-        }
-        TrajectoryRecord::SystemNotification(record) => {
-            vec![plain(record.summary.clone(), theme.text, width)]
-        }
-        TrajectoryRecord::Terminal(record) => {
-            vec![kv("terminal", terminal_word(record.kind), theme, width)]
-        }
+        Some(record) => match record {
+            piko_protocol::TrajectoryRecord::Terminal(value) => {
+                vec![kv("terminal", terminal_word(value.kind), theme, width)]
+            }
+            _ => absent_copy(detail, row, theme, width),
+        },
+        None => vec![plain(
+            "diagnostic timing was not recorded",
+            theme.muted,
+            width,
+        )],
     }
+}
+
+fn clock_lines(
+    started_at: Option<i64>,
+    finished_at: Option<i64>,
+    duration_ms: Option<u64>,
+    theme: &Theme,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if let Some(start) = started_at {
+        lines.push(kv("started", timestamp(start), theme, width));
+    } else {
+        lines.push(kv("started", "unavailable", theme, width));
+    }
+    if let Some(finish) = finished_at {
+        lines.push(kv("finished", timestamp(finish), theme, width));
+    }
+    match duration_ms {
+        Some(duration) => lines.push(kv("duration", format!("{duration} ms"), theme, width)),
+        None => lines.push(kv(
+            "duration",
+            "diagnostic timing was not recorded",
+            theme,
+            width,
+        )),
+    }
+    lines
+}
+
+fn absent_copy(
+    detail: Option<&HistoryItemDetail>,
+    row: Option<&HistoryRow>,
+    theme: &Theme,
+    width: u16,
+) -> Vec<Line<'static>> {
+    // Summary-only inspection (`i`) has not fetched the row body yet; say so
+    // instead of implying the content was never recorded.
+    if detail.is_none()
+        && matches!(
+            row,
+            Some(HistoryRow::Stream(item)) if item.has_detail
+        )
+    {
+        return vec![plain(
+            "Summary only · open the row with Enter to fetch its recorded content.",
+            theme.muted,
+            width,
+        )];
+    }
+    vec![plain(
+        "No recorded content for this tab.",
+        theme.muted,
+        width,
+    )]
+}
+
+fn timestamp(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms)
+        .map(|time| {
+            time.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M:%S %:z")
+                .to_string()
+        })
+        .unwrap_or_else(|| "unavailable".into())
 }

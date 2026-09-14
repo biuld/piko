@@ -1,12 +1,12 @@
 use super::*;
 
-pub(super) fn tool_lines(
+pub(crate) fn tool_lines(
     tool: &ToolEntry,
     hovered: bool,
     theme: &Theme,
     width: u16,
 ) -> Vec<Line<'static>> {
-    let presented = match &tool.upstream {
+    let mut presented = match &tool.upstream {
         Some(up) => upstream_presentation(tool, up),
         None => present_tool(
             &tool.name,
@@ -15,6 +15,17 @@ pub(super) fn tool_lines(
             tool.result_details.as_deref(),
         ),
     };
+    // A committed/read-only entry can retain arguments even when no result
+    // body was recorded. Do not let an args-only presenter relabel that known
+    // terminal state as "running".
+    if tool.status != ToolStatus::Running
+        && presented
+            .title_badge
+            .as_ref()
+            .is_some_and(|badge| badge.tone == BadgeTone::Running)
+    {
+        presented.title_badge = None;
+    }
     // Card tone: command badge (exit code) wins over protocol ToolStatus for shell tools.
     let bg = card_bg(tool.status, presented.title_badge.as_ref(), theme);
     let title_style = Style::default()

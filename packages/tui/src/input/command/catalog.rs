@@ -132,12 +132,11 @@ pub fn catalog() -> Vec<CommandSpec> {
         SelectionNext, "Next", "Move to the next choice", SELECTION_COMMAND, Repeatable, enabled;
         SelectionPagePrevious, "Previous page", "Move one page backward", SELECTION, Repeatable, enabled;
         SelectionPageNext, "Next page", "Move one page forward", SELECTION, Repeatable, enabled;
-        HistoryInspect, "Inspect history summary", "Inspect the selected summary without fetching content", HISTORY, PressOnly, enabled;
-        HistoryRefresh, "Refresh history", "Reload the inspected session snapshot", HISTORY, PressOnly, enabled;
+        HistoryRefresh, "Refresh trajectory", "Reload the inspected session snapshot", HISTORY, PressOnly, enabled;
         HistoryChooseSession, "Inspect session", "Choose a session without opening it", HISTORY, PressOnly, enabled;
-        HistoryFilter, "Filter history", "Filter the history list", HISTORY, PressOnly, enabled;
-        HistoryFactsOnly, "History facts only", "Show required journal facts only", HISTORY, PressOnly, enabled;
-        HistoryDiagnostics, "History diagnostics", "Toggle diagnostic visibility", HISTORY, PressOnly, enabled;
+        HistoryFilter, "Filter trajectory", "Filter the trajectory stream", HISTORY, PressOnly, enabled;
+        HistoryDetailTab, "Cycle detail tab", "Cycle Summary/Payload/Result/Timing", HISTORY, PressOnly, enabled;
+        HistoryAgentNext, "Next agent stream", "Switch to the next agent stream", HISTORY, PressOnly, enabled;
         CompletionAccept, "Accept completion", "Accept the selected suggestion", SUGGESTIONS, PressOnly, suggestions;
         CompletionAcceptAndSubmit, "Accept and submit completion", "Accept and submit the selected suggestion", SUGGESTIONS, PressOnly, suggestions;
         SessionListOpen, "Open sessions", "Open the session list", WORKSPACE, PressOnly, enabled;

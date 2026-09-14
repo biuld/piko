@@ -20,7 +20,7 @@ impl AppState {
             .map(|entry| entry.target.clone())?;
 
         let effects = match target {
-            CommandTarget::Local(crate::app::command::LocalCommandId::History) => self.dispatch(
+            CommandTarget::Local(crate::app::command::LocalCommandId::Trajectory) => self.dispatch(
                 crate::app::command::SurfaceAction::OpenHistory(parts.next().map(str::to_string))
                     .into(),
             ),

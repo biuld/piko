@@ -188,35 +188,23 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         limit: Option<u32>,
     },
-    SessionHistoryWorkPageGet {
+    /// Page the flat trajectory stream of one agent in journal order.
+    SessionHistoryAgentStreamGet {
         command_id: CommandId,
         session_id: SessionId,
-        root_input_id: String,
+        agent_instance_id: crate::AgentInstanceId,
         expected_revision: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         after_cursor: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         limit: Option<u32>,
     },
-    SessionHistoryJournalPageGet {
+    /// Lane-strip activity blocks (ModelStep / tool call) for one agent.
+    SessionHistoryLaneGet {
         command_id: CommandId,
         session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
         expected_revision: u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        after_cursor: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        limit: Option<u32>,
-        #[serde(default)]
-        provenance: crate::HistoryProvenanceFilter,
-    },
-    SessionHistoryTranscriptPageGet {
-        command_id: CommandId,
-        session_id: SessionId,
-        expected_revision: u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        after_cursor: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        limit: Option<u32>,
     },
     SessionHistoryItemGet {
         command_id: CommandId,
@@ -363,9 +351,8 @@ impl Command {
             | Self::SessionNavigate { command_id, .. }
             | Self::SessionSetLabel { command_id, .. }
             | Self::SessionHistoryOverviewGet { command_id, .. }
-            | Self::SessionHistoryWorkPageGet { command_id, .. }
-            | Self::SessionHistoryJournalPageGet { command_id, .. }
-            | Self::SessionHistoryTranscriptPageGet { command_id, .. }
+            | Self::SessionHistoryAgentStreamGet { command_id, .. }
+            | Self::SessionHistoryLaneGet { command_id, .. }
             | Self::SessionHistoryItemGet { command_id, .. }
             | Self::AgentInputSubmit { command_id, .. }
             | Self::AgentInputCancel { command_id, .. }

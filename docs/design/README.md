@@ -14,11 +14,13 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
-- [D-69: Journal-derived session history inspector](D-69-session-history-inspector.md)
+- [D-69: Session trajectory inspector (journal-derived)](D-69-session-history-inspector.md)
   implements F-52: a durable history projection, revision-consistent host
-  query, and read-only TUI Work/Agents/Transcript/Journal lenses whose skeleton
-  comes from required facts and whose trajectory detail is optional. The F-36
-  loopback HTTP/SSE viewer is retired (ADR-029).
+  query, and a read-only TUI trajectory view — one flat per-agent time stream
+  spanning works, a two-lane timing strip with a shared time axis, and tabbed
+  detail whose enrichment joins trajectory diagnostics by persisted identity.
+  The former four-lens surface (Work/Agents/Transcript/Journal) is deleted. The
+  F-36 loopback HTTP/SSE viewer is retired (ADR-029).
 - [D-68: AgentInput work model and control plane](D-68-agent-control-plane.md)
   implements F-51: Session/Agent/ModelStep invariants, AgentInput as stimulus
   and root-work identity, durable steer/follow-up admission, TUI cutover, and

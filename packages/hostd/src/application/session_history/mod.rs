@@ -1,9 +1,8 @@
-//! Read-only, journal-derived session history queries (F-52 / D-69).
+//! Read-only, journal-derived session trajectory queries (F-52 / D-69).
 
 mod detail;
 mod mapping;
-mod transcript;
-mod work;
+mod stream;
 
 #[cfg(test)]
 mod tests;
@@ -12,26 +11,29 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use piko_protocol::{
-    HistoryJournalPage, HistoryProvenanceFilter, HistoryTranscriptPage, HistoryWorkPage,
-    SessionHistoryOverview,
-};
+use piko_protocol::{HistoryLaneSummary, HistoryStreamPage, SessionHistoryOverview};
 use tokio::sync::Mutex;
 
 use crate::api::{HistoryItemDetail, HistoryItemRef, ProtocolError};
 use crate::ports::session_repository::SessionRepositoryPort;
 use crate::ports::session_store::SessionStoreFactory;
 
-use self::mapping::{commit_summary, overview};
+const DEFAULT_LIMIT: usize = 100;
+const MAX_LIMIT: usize = 400;
+/// Lane strips stay compact; older blocks remain inspectable via the stream.
+const LANE_BLOCK_LIMIT: usize = 512;
 
-const DEFAULT_LIMIT: usize = 50;
-const MAX_LIMIT: usize = 200;
+/// Read-model bundle cached by session directory, validated against the
+/// requested published revision before reuse.
+pub(crate) type InspectionCache =
+    Arc<Mutex<HashMap<String, (u64, Arc<piko_session_store::InspectionBundle>)>>>;
 
 #[derive(Clone)]
 pub struct SessionHistoryQuery {
     session_paths: Arc<Mutex<HashMap<String, PathBuf>>>,
     store_factory: Arc<dyn SessionStoreFactory>,
     storage: Option<Arc<dyn SessionRepositoryPort>>,
+    cache: InspectionCache,
 }
 
 impl SessionHistoryQuery {
@@ -39,24 +41,44 @@ impl SessionHistoryQuery {
         session_paths: Arc<Mutex<HashMap<String, PathBuf>>>,
         store_factory: Arc<dyn SessionStoreFactory>,
         storage: Option<Arc<dyn SessionRepositoryPort>>,
+        cache: InspectionCache,
     ) -> Self {
         Self {
             session_paths,
             store_factory,
             storage,
+            cache,
         }
     }
 
+    /// Load the aligned inspection bundle. When the caller pins an expected
+    /// revision, a cache entry at that revision is reused without reopening
+    /// the store; otherwise the published snapshot is loaded fresh.
     async fn bundle(
         &self,
         session_id: &str,
-    ) -> Result<piko_session_store::InspectionBundle, ProtocolError> {
+        expected: Option<u64>,
+    ) -> Result<Arc<piko_session_store::InspectionBundle>, ProtocolError> {
         let session_dir = self.session_dir(session_id).await?;
-        self.store_factory
-            .open(&session_dir)
-            .inspection()
-            .await
-            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))
+        let key = session_dir.to_string_lossy().to_string();
+        if let Some(expected) = expected {
+            let cache = self.cache.lock().await;
+            if let Some((revision, bundle)) = cache.get(&key)
+                && *revision == expected
+            {
+                return Ok(Arc::clone(bundle));
+            }
+        }
+        let bundle = Arc::new(
+            self.store_factory
+                .open(&session_dir)
+                .inspection()
+                .await
+                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?,
+        );
+        let mut cache = self.cache.lock().await;
+        cache.insert(key, (bundle.revision, Arc::clone(&bundle)));
+        Ok(bundle)
     }
 
     async fn session_dir(&self, session_id: &str) -> Result<PathBuf, ProtocolError> {
@@ -79,92 +101,55 @@ impl SessionHistoryQuery {
     pub async fn overview(
         &self,
         session_id: &str,
-        cursor: Option<&str>,
-        limit: Option<u32>,
     ) -> Result<SessionHistoryOverview, ProtocolError> {
-        let bundle = self.bundle(session_id).await?;
-        Ok(overview(
-            session_id,
-            &bundle,
-            cursor_offset(cursor, "work", bundle.revision)?,
-            page_limit(limit),
-        ))
+        let bundle = self.bundle(session_id, None).await?;
+        Ok(mapping::overview(session_id, &bundle))
     }
 
-    pub async fn work_page(
+    pub async fn agent_stream(
         &self,
         session_id: &str,
-        root_input_id: &str,
+        agent_instance_id: &str,
         expected_revision: u64,
-        cursor: Option<&str>,
+        after_cursor: Option<&str>,
         limit: Option<u32>,
-    ) -> Result<HistoryWorkPage, ProtocolError> {
-        let bundle = self.bundle(session_id).await?;
+    ) -> Result<HistoryStreamPage, ProtocolError> {
+        let bundle = self.bundle(session_id, Some(expected_revision)).await?;
         require_revision(expected_revision, bundle.revision)?;
-        if bundle
-            .current
-            .agent_inputs
-            .get(root_input_id)
-            .is_none_or(|stored| stored.root_input_id.as_deref() != Some(root_input_id))
-        {
+        if !bundle.current.agents.contains_key(agent_instance_id) {
             return Err(ProtocolError::InvalidCommand(format!(
-                "history work {root_input_id} not found"
+                "history agent {agent_instance_id} not found"
             )));
         }
-        let offset = cursor_offset(cursor, &format!("item:{root_input_id}"), bundle.revision)?;
-        Ok(work::work_page(
+        let limit = page_limit(limit);
+        let offset = cursor_offset(
+            after_cursor,
+            &format!("agent:{agent_instance_id}"),
+            bundle.revision,
+        )?;
+        Ok(stream::agent_stream(
             session_id,
-            root_input_id,
+            agent_instance_id,
             &bundle,
             offset,
-            page_limit(limit),
+            limit,
         ))
     }
 
-    pub async fn transcript_page(
+    pub async fn lane_summary(
         &self,
         session_id: &str,
+        agent_instance_id: &str,
         expected_revision: u64,
-        cursor: Option<&str>,
-        limit: Option<u32>,
-    ) -> Result<HistoryTranscriptPage, ProtocolError> {
-        let bundle = self.bundle(session_id).await?;
+    ) -> Result<HistoryLaneSummary, ProtocolError> {
+        let bundle = self.bundle(session_id, Some(expected_revision)).await?;
         require_revision(expected_revision, bundle.revision)?;
-        let offset = cursor_offset(cursor, "transcript", bundle.revision)?;
-        Ok(transcript::transcript_page(
-            session_id,
-            &bundle,
-            offset,
-            page_limit(limit),
-        ))
-    }
-
-    pub async fn journal_page(
-        &self,
-        session_id: &str,
-        expected_revision: u64,
-        cursor: Option<&str>,
-        limit: Option<u32>,
-        filter: HistoryProvenanceFilter,
-    ) -> Result<HistoryJournalPage, ProtocolError> {
-        let bundle = self.bundle(session_id).await?;
-        require_revision(expected_revision, bundle.revision)?;
-        let commits = bundle
-            .history
-            .commits
-            .iter()
-            .filter_map(|commit| commit_summary(commit, filter, bundle.revision, &bundle))
-            .collect::<Vec<_>>();
-        let prefix = format!("commit:{filter:?}");
-        let offset = cursor_offset(cursor, &prefix, bundle.revision)?;
-        let (commits, next_cursor) =
-            page(commits, offset, page_limit(limit), &prefix, bundle.revision);
-        Ok(HistoryJournalPage {
-            session_id: session_id.to_string(),
-            revision: bundle.revision,
-            commits,
-            next_cursor,
-        })
+        if !bundle.current.agents.contains_key(agent_instance_id) {
+            return Err(ProtocolError::InvalidCommand(format!(
+                "history agent {agent_instance_id} not found"
+            )));
+        }
+        Ok(stream::lane_summary(session_id, agent_instance_id, &bundle))
     }
 
     pub async fn item_detail(
@@ -172,7 +157,7 @@ impl SessionHistoryQuery {
         session_id: &str,
         item_ref: &HistoryItemRef,
     ) -> Result<HistoryItemDetail, ProtocolError> {
-        let bundle = self.bundle(session_id).await?;
+        let bundle = self.bundle(session_id, Some(item_ref.revision)).await?;
         require_revision(item_ref.revision, bundle.revision)?;
         detail::resolve(item_ref, &bundle)
     }
@@ -203,24 +188,6 @@ fn cursor_offset(
     let offset = offset.parse().map_err(|_| invalid())?;
     require_revision(snapshot, revision)?;
     Ok(offset)
-}
-
-pub(super) fn page<T>(
-    values: Vec<T>,
-    offset: usize,
-    limit: usize,
-    prefix: &str,
-    revision: u64,
-) -> (Vec<T>, Option<String>) {
-    let total = values.len();
-    let values = values
-        .into_iter()
-        .skip(offset)
-        .take(limit)
-        .collect::<Vec<_>>();
-    let next = offset.saturating_add(values.len());
-    let cursor = (next < total).then(|| format!("{prefix}:{revision}:{next}"));
-    (values, cursor)
 }
 
 fn require_revision(expected: u64, actual: u64) -> Result<(), ProtocolError> {

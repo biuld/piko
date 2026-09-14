@@ -217,6 +217,16 @@ pub fn apply_commit(projection: &mut HistoryProjection, commit: &DurableCommit) 
     projection.revision = commit.revision;
 }
 
+fn disposition_word(disposition: AgentInputDisposition) -> &'static str {
+    match disposition {
+        AgentInputDisposition::PendingFollowUp => "queued follow-up",
+        AgentInputDisposition::PendingSteer => "queued steer",
+        AgentInputDisposition::AppliedAsRoot => "a root work",
+        AgentInputDisposition::AppliedToStep => "an applied steer",
+        AgentInputDisposition::Cancelled => "cancelled",
+    }
+}
+
 fn history_event(
     raw: &crate::RawEvent,
     projection: &mut HistoryProjection,
@@ -275,7 +285,10 @@ fn history_event(
             event.transition = Some(HistoryTransition::InputAdmitted {
                 disposition: admitted.disposition,
             });
-            event.summary = format!("input admitted as {:?}", admitted.disposition);
+            event.summary = format!(
+                "input admitted as {}",
+                disposition_word(admitted.disposition)
+            );
         }
         EventData::AgentInputDispositionChangedV1(changed) => {
             event.agent_instance_id = Some(changed.agent_instance_id);
@@ -285,7 +298,7 @@ fn history_event(
             event.transition = Some(HistoryTransition::InputDispositionChanged {
                 disposition: changed.disposition,
             });
-            event.summary = format!("input became {:?}", changed.disposition);
+            event.summary = format!("input became {}", disposition_word(changed.disposition));
         }
         EventData::AgentInputAppliedV1(applied) => {
             event.agent_instance_id = Some(applied.agent_instance_id);

@@ -385,7 +385,7 @@ pub(super) const TOOL_TITLE_ROW_OFFSET: usize = 1;
 /// ```
 /// Expanded inserts body between title and bottom pad.
 mod tool;
-use tool::tool_lines;
+pub(crate) use tool::tool_lines;
 mod upstream;
 use upstream::upstream_presentation;
 

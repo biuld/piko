@@ -243,16 +243,12 @@ impl AppState {
                 self.push_surface(SurfaceId::Notifications);
                 self.status = "notifications".to_string();
             }
-            action @ (SurfaceAction::HistoryInspect
-            | SurfaceAction::OpenHistory(_)
+            action @ (SurfaceAction::OpenHistory(_)
             | SurfaceAction::HistoryRefresh
             | SurfaceAction::HistoryChooseSession
-            | SurfaceAction::HistorySelectLens(_)
-            | SurfaceAction::HistoryFilter
-            | SurfaceAction::HistoryFactsOnly
-            | SurfaceAction::HistoryDiagnostics
-            | SurfaceAction::HistoryLensPrevious
-            | SurfaceAction::HistoryLensNext) => return self.dispatch_history(action),
+            | SurfaceAction::HistorySelectAgent(_)
+            | SurfaceAction::HistoryDetailTab(_)
+            | SurfaceAction::HistoryFilter) => return self.dispatch_history(action),
             SurfaceAction::OpenTree => {
                 self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
                 self.push_surface(SurfaceId::Tree);
@@ -278,12 +274,13 @@ impl AppState {
             }
             SurfaceAction::Close => self.close_surface(),
             SurfaceAction::SelectNext => {
-                self.select_surface_next();
+                let mut effects = self.select_surface_next();
                 if self.mode() == AppMode::Surface(SurfaceId::History) {
-                    return self.history_next_page();
+                    effects.extend(self.history_next_page());
                 }
+                return effects;
             }
-            SurfaceAction::SelectPrev => self.select_surface_prev(),
+            SurfaceAction::SelectPrev => return self.select_surface_prev(),
             SurfaceAction::Confirm => return self.confirm_selection(),
             SurfaceAction::FilterAppend(ch) => self.append_active_filter(ch),
             SurfaceAction::FilterBackspace => self.backspace_active_filter(),

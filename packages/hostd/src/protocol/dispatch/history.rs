@@ -9,9 +9,8 @@ impl HostServer {
         let command_id = command.command_id().to_string();
         let session_id = match &command {
             Command::SessionHistoryOverviewGet { session_id, .. }
-            | Command::SessionHistoryWorkPageGet { session_id, .. }
-            | Command::SessionHistoryJournalPageGet { session_id, .. }
-            | Command::SessionHistoryTranscriptPageGet { session_id, .. }
+            | Command::SessionHistoryAgentStreamGet { session_id, .. }
+            | Command::SessionHistoryLaneGet { session_id, .. }
             | Command::SessionHistoryItemGet { session_id, .. } => session_id.clone(),
             _ => unreachable!("history command routing"),
         };
@@ -19,72 +18,45 @@ impl HostServer {
             self.session_paths.clone(),
             self.session_store_factory.clone(),
             self.storage.clone(),
+            self.history_cache.clone(),
         );
         let result = match command {
-            Command::SessionHistoryOverviewGet {
-                after_cursor,
-                limit,
-                ..
-            } => query
-                .overview(&session_id, after_cursor.as_deref(), limit)
-                .await
-                .map(|overview| CommandResult::SessionHistoryOverviewGot {
-                    overview,
-                    timestamp: now_ms(),
-                }),
-            Command::SessionHistoryWorkPageGet {
-                root_input_id,
+            Command::SessionHistoryOverviewGet { .. } => {
+                query.overview(&session_id).await.map(|overview| {
+                    CommandResult::SessionHistoryOverviewGot {
+                        overview,
+                        timestamp: now_ms(),
+                    }
+                })
+            }
+            Command::SessionHistoryAgentStreamGet {
+                agent_instance_id,
                 expected_revision,
                 after_cursor,
                 limit,
                 ..
             } => query
-                .work_page(
+                .agent_stream(
                     &session_id,
-                    &root_input_id,
+                    &agent_instance_id,
                     expected_revision,
                     after_cursor.as_deref(),
                     limit,
                 )
                 .await
-                .map(|page| CommandResult::SessionHistoryWorkPaged {
+                .map(|page| CommandResult::SessionHistoryAgentStreamPaged {
                     page,
                     timestamp: now_ms(),
                 }),
-            Command::SessionHistoryJournalPageGet {
+            Command::SessionHistoryLaneGet {
+                agent_instance_id,
                 expected_revision,
-                after_cursor,
-                limit,
-                provenance,
                 ..
             } => query
-                .journal_page(
-                    &session_id,
-                    expected_revision,
-                    after_cursor.as_deref(),
-                    limit,
-                    provenance,
-                )
+                .lane_summary(&session_id, &agent_instance_id, expected_revision)
                 .await
-                .map(|page| CommandResult::SessionHistoryJournalPaged {
-                    page,
-                    timestamp: now_ms(),
-                }),
-            Command::SessionHistoryTranscriptPageGet {
-                expected_revision,
-                after_cursor,
-                limit,
-                ..
-            } => query
-                .transcript_page(
-                    &session_id,
-                    expected_revision,
-                    after_cursor.as_deref(),
-                    limit,
-                )
-                .await
-                .map(|page| CommandResult::SessionHistoryTranscriptPaged {
-                    page,
+                .map(|summary| CommandResult::SessionHistoryLaneGot {
+                    summary,
                     timestamp: now_ms(),
                 }),
             Command::SessionHistoryItemGet { item_ref, .. } => query

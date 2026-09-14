@@ -8,14 +8,13 @@ use piko_protocol::{
 fn inspected() -> AppState {
     let mut app = live_app();
     app.open_history(Some("archived".into()));
-    app.history.pending_command_id = None;
+    app.history.pending_commands.clear();
     app.history.set_overview(SessionHistoryOverview {
         session_id: "archived".into(),
         cwd: "/project".into(),
         name: None,
         revision: 7,
         agents: Vec::new(),
-        works: Vec::new(),
         next_cursor: None,
     });
     app
@@ -30,7 +29,7 @@ fn request_detail(app: &mut AppState) -> String {
             token: "opaque".into(),
         },
     });
-    app.history.pending_command_id.clone().unwrap()
+    app.history.pending_commands[0].clone()
 }
 
 fn detail_response(command_id: String) -> Event {
@@ -51,6 +50,7 @@ fn detail_response(command_id: String) -> Event {
                         timestamp: None,
                     },
                 }),
+                diagnostic: None,
             },
             timestamp: 0,
         }),

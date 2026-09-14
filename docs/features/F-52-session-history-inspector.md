@@ -1,8 +1,7 @@
-# F-52: Session history inspector
+# F-52: Session trajectory inspector
 
-> Status: in progress
-> UI refinement: implemented 2026-09-05; verification evidence in
-> [F-52 UI refinement](../verification/F-52-history-ui-refinement.md)
+> Status: redesign implemented 2026-09-13 (single trajectory view landed;
+> remaining acceptance criteria are visual verification and E2E run-through)
 > Priority: P1
 > Source evidence: piko product decision; F-31 durable journal, F-37
 > materialized read models, F-48 authoritative ModelStep boundaries, and F-51
@@ -10,343 +9,199 @@
 
 ## Summary
 
-piko provides a read-only TUI inspector for understanding how a durable
-session was composed. It organizes history by Session, AgentInstance, root
-AgentInput work, ModelStep, message, and tool relations, while preserving the
-journal's commit order and atomic boundaries. Required journal facts form the
-authoritative history. Best-effort trajectory observations enrich that history
-with prompt assembly, provider timing, retries, fallbacks, and intermediate
-tool status without replacing or contradicting the facts.
+piko provides a read-only TUI trajectory view for reviewing how a historical
+session unfolded. The session is presented as one flat, time-ordered stream per
+AgentInstance: every user input, assistant message, and tool call appears as a
+role-badged row in journal order, regardless of which root AgentInput work it
+belonged to. A compact lane strip above the stream visualizes ModelStep and
+tool-call activity over time and supports jumping. A detail pane with tabs
+(Summary, Payload, Result, Timing) shows the full content of the selected row.
+
+This redesign replaces the previous four-lens inspector (Work / Agents /
+Transcript / Journal). All removed lenses, their queries, and their DTOs are
+deleted, not deprecated.
 
 ## Problem
 
-The existing session surfaces answer separate operational questions:
+The previous F-52 design organized history by causal work closure (root
+AgentInput → ModelSteps → facts) across four lenses. Reviewing the design in
+use showed:
 
-- Resume Session finds and opens a session.
-- Session Tree navigates the committed conversation branch.
-- Timeline renders the selected agent's conversation.
-- The retired trajectory web viewer displayed a best-effort diagnostic record
-  organized around an older run-oriented model.
-
-None of them explains the current durable domain model as one coherent history.
-A developer cannot inspect one historical session and reliably answer:
-
-- which AgentInput started a unit of work, which inputs steered it, and which
-  follow-ups remained queued or were cancelled;
-- which assistant message and ordered tool declarations belong to each
-  ModelStep;
-- which tool results, pending actions, interrupts, reports, and usage facts
-  belong to the same causal root;
-- how agents, roots, transcript ancestry, branches, compactions, and commits
-  relate;
-- which displayed information is authoritative and which is optional
-  diagnostic capture.
-
-The trajectory viewer could not be promoted to that role. Trajectory records are
-intentionally optional and may be dropped, while the journal's required facts
-are validated, replayable authority. A new history surface must begin from the
-journal model rather than infer authority from trajectory timestamps.
+- The primary question a developer asks is "what happened in this session, in
+  order?" The Work lens forced selecting a root AgentInput before showing any
+  messages, fragmenting a linear conversation into per-work closures.
+- The Agents lens duplicated what an agent picker solves in one control.
+- The Transcript lens overlapped the Timeline of the live session surface; for
+  historical review its tree/branch detail is a niche need.
+- The Journal lens is a store-debugging tool, not a product surface; the
+  journal remains inspectable on disk.
+- Four lenses × wide/narrow layouts × provenance filters produced ~2100 lines
+  of presentation code for a read-only viewer, with the remaining acceptance
+  criteria all pixel-level visual work.
 
 ## User journeys
 
-1. A developer opens Session History, selects a session without resuming it,
-   and sees its agents and root AgentInput work newest first.
-2. The developer opens one root and follows its input admission, processing
-   boundaries, ordered ModelSteps, assistant messages, tool declarations and
-   results, steers, pending actions, interrupts, usage, and terminal outcome.
-3. The developer switches to Agents and follows parent/child AgentInstance
-   relationships, detached work, and inbox reports without introducing Run or
-   Execution as product concepts.
-4. The developer switches to Transcript and sees message ancestry, session-tree
-   branches, branch selection, compaction, and summaries independently from
-   causal work grouping.
-5. The developer switches to Journal and inspects revision-ordered commits and
-   their ordered facts, including which facts were committed atomically.
-6. When matching trajectory observations exist, the developer expands a prompt
-   assembly, retry, fallback, provider timing, or intermediate tool-status
-   detail. The surface labels it diagnostic and remains usable when it is
-   absent.
-7. After restarting hostd, the same published history remains queryable without
-   replaying the journal on the ordinary read path.
+1. A developer opens the trajectory view (defaulting to the active session),
+   picks an agent from the agent selector, and reads the flat stream of that
+   agent's inputs, assistant messages, and tool calls in journal order.
+2. The developer scans the lane strip to find a slow or failed region, clicks
+   or keys to a block, and the stream selects the corresponding row.
+3. The developer opens a tool-call row and reads the detail tabs: Summary
+   (status, duration, relations), Payload (arguments), Result (output or
+   error), Timing (start/finish/duration, retries, fallback when diagnostic
+   data exists).
+4. The developer switches the agent selector to a child agent and reads its
+   stream separately.
+5. After restarting hostd, the same trajectory remains queryable from the
+   published read models without journal replay.
 
 ## In scope
 
-- A read-only TUI Session History surface for current and historical sessions.
-- Session selection without opening, resuming, attaching, or changing the
-  active session.
-- Four history lenses:
-  - **Work**: root AgentInput causal closures and their ModelSteps, messages,
-    tools, controls, usage, and outcome.
-  - **Agents**: AgentInstance hierarchy, work, caller relations, and inbox
-    report flow.
-  - **Transcript**: message ancestry, session tree, selected branch history,
-    compaction, and branch summaries.
-  - **Journal**: revision-ordered commits with ordered event summaries and
-    visible atomic commit boundaries.
-- Explicit provenance for every item: authoritative required fact or optional
-  diagnostic observation, independently from whether referenced detail is
-  available.
-- Cursor-paged lists and lightweight item summaries; full large content is
-  fetched only when the user opens that item.
-- A durable, write-time history read model. Normal queries do not replay or
-  scan journal segments.
-- Best-effort trajectory enrichment for prompt assembly, provider request
-  metadata, retries, fallbacks, timing, and intermediate tool-call states.
-- Stable generic presentation for recognized-but-not-specialized history items
-  so a new event kind does not make the whole surface unusable.
-- Loading, empty, unavailable-detail, integrity-error, and stale/rebuild states.
-- Retirement of the F-36 loopback HTTP/SSE trajectory viewer (ADR-029).
+- A read-only TUI trajectory surface for current and historical sessions.
+- Session selection without opening, resuming, or changing the active session.
+- **Agent-sharded streams**: one flat time-ordered stream per AgentInstance,
+  selected via an agent selector (root default). The selector replaces the
+  former Agents lens.
+- **Lane strip**: one lane each for ModelSteps and tool calls of the selected
+  agent, blocks positioned/sized by recorded timing where available and by
+  sequence otherwise; blocks are selectable and drive stream selection. When
+  diagnostic timing is absent the strip degrades to a sequence strip and says
+  so.
+- **Detail tabs** for the selected row: Summary, Payload, Result, Timing.
+  Tabs with no content are shown as empty with a reason (e.g. timing data is
+  diagnostic and absent), never silently omitted.
+- Explicit refresh only; revision-aligned snapshots; `HistoryRevisionChanged`
+  handling as today.
+- Cursor-paged stream rows; large bodies fetched only when a row is opened.
+- Loading, empty, unavailable-detail, and integrity-error states.
+- Provenance is internal: facts form the stream; diagnostics only enrich
+  detail tabs and lane timing. No user-facing provenance filter.
 
 ## Out of scope
 
-- Realtime following, polling, streaming deltas, animation, or an SSE client.
-- Mutating, resuming, forking, navigating, retrying, cancelling, or deleting a
-  session from the history surface.
-- Treating Turn, Run, or Execution as product identities.
-- Treating trajectory records, timestamps, or adjacency as durable authority.
-- Reconstructing model streaming deltas that were never persisted.
-- Guaranteeing diagnostic content when best-effort capture dropped a record.
-- Cross-session analytics, run comparison, evaluation datasets, or export.
-- Showing secret authentication material or unredacted provider transport
-  payloads that are not part of the durable content policy.
-- Reviving a loopback HTTP/SSE trajectory viewer. ADR-029 retires that surface;
-  Session History is the inspector.
+- Realtime following, polling, streaming deltas, or live updates (explicit
+  refresh only).
+- Mutating, resuming, forking, retrying, cancelling, or deleting from the
+  surface.
+- The former Transcript lens (message ancestry/tree/branch views) — deleted.
+- The former Journal lens (in-product commit/event browsing) — deleted,
+  including its query and DTOs.
+- The former Work lens (per-root-work causal closures) — deleted; the stream
+  spans works. Work grouping survives only as an internal grouping key if
+  needed for lane segments.
+- The former Agents lens (hierarchy browsing, inbox report flow, origins) —
+  deleted; the agent selector lists agents with parent indentation and
+  lifecycle only.
+- User-facing provenance filtering (facts-only / diagnostics-only toggles).
+- Cross-session analytics, comparison, or export.
+- Search beyond the existing local filter over loaded rows.
 
 ## Behavior and states
 
 ### Navigation
 
-Session History opens as a full-body browse surface. It defaults to the active
-session when one exists and otherwise opens the normal session selector. A
-session chosen for inspection remains separate from the active session.
+The trajectory view opens as a full-body browse surface, defaulting to the
+active session when one exists. It retains a breadcrumb (session · agent ·
+revision). Wide layout shows stream and detail side by side; narrow layout
+drill-down. The `/trajectory [session-id]` command opens the surface; the old
+`/history` command is not retained as an alias. Closing restores the previous
+surface and changes nothing.
 
-The surface retains a breadcrumb through Session, lens, work or agent, and
-selected item. Wide terminals may show selection and detail panes together;
-narrow terminals use drill-down navigation with the same state and commands.
+### Stream
 
-Closing Session History restores the previous TUI surface and does not change
-the inspected or active session.
+- One row per durable item of the selected agent: user inputs, assistant
+  messages (text/thinking distinct), tool calls with role badges and previews.
+- Rows are ordered by journal position across all works of the agent.
+- Rows show: role badge, short preview, status/duration when known, and an
+  indicator when diagnostic detail is attached.
+- ModelStep boundaries remain in journal order but render as muted ending
+  markers (`Step N ended · outcome · duration`), not as message-like rows.
+- Local filter over loaded rows; filter-empty is distinct from stream-empty.
+- Pagination remains automatic and does not occupy a list row with a `more`
+  label.
+- Pointer-wheel and trackpad input scroll the list viewport directly in
+  multi-row increments. Scrolling does not fetch detail; when the selected row
+  leaves the viewport, selection follows the nearest visible edge.
+- Bursts of trackpad events are applied before repaint so scrolling remains
+  responsive without dropping the final viewport position.
+- Clicking a visible stream row selects that absolute row and opens its detail,
+  including after the list has scrolled and in the wide split layout.
 
-### Information presentation and reading hierarchy
+### Lane strip
 
-The inspector helps developers explain a session's causal structure and inspect
-its evidence. The default Work lens prioritizes which input started work, which
-agent processed it, what happened through its ModelSteps, and the recorded
-outcome. Agents explains delegation; Transcript explains ancestry and branches;
-Journal explains atomic commits. Each lens retains its distinct question and
-ordering rather than presenting the same event list under different tabs.
+- Two lanes: ModelSteps and tool calls of the selected agent.
+- A full-width muted border separates the lane strip from the stream/detail
+  region below it.
+- Block width maps to recorded duration when both start and end exist;
+  otherwise a fixed minimal width in sequence position. Missing timing is
+  rendered distinctly, not as zero duration.
+- Selecting a block selects the corresponding stream row; selecting a step
+  row highlights the step's blocks.
 
-The surface has three information levels:
+### Detail tabs
 
-1. **Context:** inspected session, snapshot revision, active lens, breadcrumb,
-   and active filters. Users can distinguish the inspected snapshot from active
-   chat and see whether diagnostics are hidden.
-2. **Scan summary:** a meaningful label or input preview, relevant agent/entity,
-   recorded state or transition, and visible provenance/availability. Counts,
-   clocks, usage, and shortened identifiers are secondary. Labels such as step,
-   tool, and message counts must be understandable without guessing units.
-3. **Selected detail:** semantic content followed by the persisted relations and
-   evidence needed to trace it. Full identities, revisions, commit metadata,
-   and diagnostic context remain accessible; summaries may shorten them.
-
-On constrained widths, optional metadata yields before meaningful labels,
-critical state, or provenance. Availability and provenance remain independently
-visible: an unavailable diagnostic must still be identifiable as diagnostic.
-Color supplements textual labels and does not carry authority on its own.
-Missing information must not be presented as zero, success, or inferred causation.
-
-Details preserve content structure: assistant text and thinking are distinct,
-non-text content is acknowledged, tool arguments and results are separate, and
-prompt assembly exposes its recorded blocks. Known content uses semantic
-formatting; unknown content has a labeled structured fallback. A preview or
-rendering limit must show that content was omitted and provide a way to inspect
-available content. Unavailable content includes a reason. Optional diagnostic
-absence never prevents inspection of the associated fact.
-
-### Layout and interaction refinement
-
-Use consistent outer insets, list-row padding, hierarchy indentation, and
-spacing between detail sections. Keep lists compact; reserve extra vertical
-space for meaningful context and detail boundaries. Selection, hover, keyboard
-focus, failure, provenance, and unavailable states must be distinguishable.
-Selection remains visible while focus moves into detail.
-
-Wide mode provides a selector and independently scrollable detail pane. Narrow
-mode provides the same content and navigation as drill-down pages. Selection
-shows only the already loaded summary; opening an item explicitly fetches its
-large detail. The opened item's identity remains visible if list selection
-subsequently changes, so old content cannot be mistaken for a new selection.
-The `i` action and each row's information target open its already loaded
-summary in either layout mode without a request. Returning from detail restores
-list selection and scroll position. Resizing
-preserves the selected/opened identities and does not fetch content implicitly.
-
-Keyboard and pointer users can both open items, scroll detail, return, change
-lenses, and refresh. Focus and guidance identify which pane receives scrolling;
-Tab/Shift+Tab keep their lens-switching meaning. Hover must not reflow rows.
-Pointer regions come from the same prepared layout as painting.
-
-Filtering is explicitly local to loaded summaries. Show the filter scope and
-active fact/diagnostic settings; zero matches is distinct from an empty lens
-and does not claim that unloaded history has no matches. Pagination and detail
-loading have separate feedback. A detail error does not erase the list; page
-fetch errors preserve previously loaded complete rows with retry guidance.
-Refresh and revision-change handling keep the snapshot boundary explicit and
-never merge detail or pages from different revisions.
-
-### Work lens
-
-One work row represents the causal closure of an AgentInput whose disposition
-became `applied_as_root`. The row shows its origin, target agent, input preview,
-start/finish times, outcome, ModelStep/tool/message counts, and effective usage.
-
-Work detail is ordered by authoritative journal position. It includes related
-steers and their applied ModelStep, processing boundaries, ModelSteps, committed
-messages, tool declarations and results, pending-action transitions, interrupt
-intent, reports, usage facts and corrections, and terminal outcome.
-
-The display groups related facts for readability but always exposes their
-revision and does not invent a lifecycle event that was not recorded.
-
-### Agents lens
-
-The Agents lens shows stable AgentInstance parentage and lifecycle. Work is
-grouped under its target agent. Caller and report relations appear when the
-journal contains their stable causal identifiers. Missing legacy causation is
-shown as unavailable rather than inferred from timing.
-
-### Transcript lens
-
-The Transcript lens is independent from Work grouping. It shows agent-private
-message ancestry and the host session tree, including off-branch entries,
-branch selections, compactions, branch summaries, and the current selected
-position. A message may link back to its root work and ModelStep.
-
-### Journal lens
-
-The Journal lens orders commits by durable revision and events by their order
-inside the commit. A commit is rendered as one atomic group with commit time,
-producer, causation/correlation identifiers when present, and event summaries.
-The default view hides large bodies; opening an item requests its structured
-detail.
-
-### Provenance
-
-Every item has a visible provenance:
-
-- **fact**: a required event accepted by the journal and included in replay;
-- **diagnostic**: an optional, ignorable observation such as trajectory.
-
-Availability is separate from provenance. A relation or detail that cannot be
-proven from persisted identifiers is marked **unavailable** while retaining
-the provenance of the item that refers to it.
-
-Diagnostic absence never changes a work status, terminal outcome, message
-relation, usage total, or any other authoritative conclusion.
+- Summary: kind, status, outcome, identities (agent, work, step, message,
+  tool call), commit revision/time. Each field is shown once; journal metadata
+  is part of Summary rather than repeated below every tab.
+- Payload: message content structure or input content. Tool-call payloads use
+  the same expanded, tool-specific card presenter as the Timeline instead of
+  exposing raw argument JSON.
+- Result: tool result or error; tool-call results reuse the same Timeline card
+  language and absent result shows the reason.
+- Timing: start/finish/duration; retries, fallbacks, provider/model when
+  diagnostic trajectory records joined by persisted identity exist. Absent
+  diagnostics show "diagnostic unavailable", never fabricated values.
 
 ### Loading and errors
 
-- An empty session shows its identity and an empty-history explanation.
-- A session with no root work can still show session, agent, transcript, and
-  journal facts.
-- A missing diagnostic record leaves the authoritative item present with a
-  diagnostic-unavailable state.
-- A missing or stale history projection is rebuilt from the journal before it
-  is served; the TUI shows loading and never renders a knowingly mixed
-  revision.
-- An integrity failure is shown on the selected session and does not silently
-  fall back to partial history.
-- A paged query that becomes stale is restarted against the newer published
-  revision rather than merging revisions.
+- Empty session shows identity and an explanation.
+- Missing/stale read models rebuild from the journal before serving; the UI
+  shows loading and never mixes revisions.
+- Detail errors do not erase the stream; page errors keep loaded rows with
+  retry guidance.
+- Integrity failure is surfaced for the selected session without partial
+  fallback.
+- Revision-aligned inspection data may be shared in host memory and previously
+  opened item details may be cached by the client for that revision. Reopening
+  a cached row does not repeat storage IO or copy the full inspection snapshot.
+- Formatted detail content is reused while only its viewport changes, so
+  wheel/trackpad scrolling does not reformat or rewrap the full body.
 
 ## Acceptance criteria
 
-- [x] Selecting a historical session for inspection does not open it or change
-      the TUI's active session.
-- [x] Work history is organized by root AgentInput and contains every related
-      required input, processing, ModelStep, message, tool, action, interrupt,
-      usage, report, and outcome fact in durable order.
-- [x] A ModelStep displays its assistant message and ordered tool declarations
-      from the required atomic relation, never from trajectory adjacency.
-- [x] Work, Agents, Transcript, and Journal lenses link the same identities
-      without introducing Turn, Run, or Execution IDs.
-- [x] Journal commits and their event order are visible, and events committed
-      in one revision are rendered as one atomic group.
-- [x] Every item distinguishes required fact from optional diagnostic
-      observation, and independently identifies unavailable detail or relation.
-- [x] Removing all trajectory observations from a fixture does not change any
-      authoritative work status or relation; only diagnostic detail disappears.
-- [x] Large messages, prompt assemblies, tool payloads, and journal histories
-      are not transferred until requested and lists remain cursor-paged.
-- [x] A normal history query reads published read models and does not replay or
-      scan journal segments; missing/stale models rebuild and then return the
-      same result as full replay.
-- [x] A query response joins only projections at one revision/checksum.
-- [x] Older sessions without child-origin facts remain inspectable and label
-      the exact origin unavailable instead of guessing.
-- [x] TUI keyboard, pointer, narrow-layout, empty-state, and error-state tests
-      pass together with package fmt, clippy, and tests.
-- [x] After hostd restart, history overview/work/journal queries match the
-      published snapshot without reading journal segments.
-- [x] Cross-process soak covers child spawn/origin, approved write, compaction,
-      and interrupt; usage correction and failed work survive aligned reads
-      after the journal is hidden.
-- [x] The loopback HTTP/SSE trajectory viewer, static assets, live fan-out,
-      and `[trajectory]` bind/port/enabled settings are removed (ADR-029);
-      leftover `[trajectory]` keys in user settings are ignored.
-- [ ] Work, Agents, Transcript, and Journal expose their distinct reading
-      hierarchy at narrow and wide widths, including long labels and CJK text.
-- [ ] Context identifies the inspected session/revision, lens, breadcrumb, and
-      local filter scope; provenance and availability remain independently
-      visible even for unavailable diagnostics.
-- [ ] Selected detail preserves typed content, full available relations, and
-      explicit omissions; prompt blocks and long bodies are inspectable without
-      silently stopping at a preview limit.
-- [ ] List and detail scroll independently; return and resize preserve reading
-      context; keyboard and pointer behavior share painted geometry and do not
-      fetch large bodies on selection alone.
-- [ ] Pagination, detail loading/errors, filtered-empty states, and revision
-      changes preserve valid context without showing mixed snapshot content.
-- [ ] Visual verification covers all four lenses, selection/hover/focus,
-      missing legacy relations, absent diagnostics, and long content.
-- [x] Workspace-wide fmt/clippy/tests passed on 2026-09-06; remaining UI visual
-      acceptance criteria above still gate F-52 completion.
+- [ ] Selecting a session for inspection does not change the active session.
+- [ ] The stream shows all durable inputs, assistant messages, and tool calls
+      of the selected agent in journal order, spanning root works.
+- [ ] The agent selector lists all agents (parent-indented, lifecycle
+      badge) and switches streams without refetching other agents' pages.
+- [ ] The lane strip renders step/tool blocks with timing when available and
+      sequence otherwise; selection is bidirectionally linked with the stream.
+- [ ] Detail tabs present Summary/Payload/Result/Timing; absent diagnostic
+      data is labeled, not fabricated.
+- [ ] Large bodies load only on open; stream pages are cursor-paged and
+      revision-bound.
+- [ ] After hostd restart, trajectory queries match the published snapshot
+      without reading journal segments.
+- [ ] The four former lenses, their commands, results, DTOs, and TUI code are
+      removed; workspace fmt/clippy/tests pass.
 
 ## Product decisions
 
 | Question | Decision | Rationale |
 |---|---|---|
-| What is the primary product concept? | Session History organized by Session, AgentInstance, root AgentInput, and ModelStep | These are the current durable grains; trajectory's Run model is obsolete. |
-| What is authoritative? | Required journal facts | They are validated and replayed; trajectory is best-effort. |
-| What role does trajectory keep? | Optional diagnostic enrichment | It uniquely carries prompt assembly, retries, fallbacks, and provider timing. |
-| Is the UI a raw event viewer? | No; semantic lenses with an advanced Journal lens | Most questions are causal, while revision/event detail remains available for debugging. |
-| Does inspecting a session resume it? | No | Read-only historical inspection must not change active product state. |
-| Are reads implemented by journal replay? | No | F-37 requires write-time read models for query surfaces. |
-| Does Session History replace the web viewer? | Yes (ADR-029) | TUI coverage landed; a second run-oriented live HTTP surface contradicts fact authority and explicit-refresh inspection. |
-| Does it update live? | No; explicit refresh only | Historical comprehension does not require another realtime state path. |
-
-## Fusion decisions (codex-rs)
-
-This feature is a piko product decision and is not derived from a codex-rs
-surface. codex-rs remains evidence for individual runtime behaviors already
-accepted by F-31, F-36, F-48, and F-51; no viewer parity is required.
-
-| codex-rs behavior | Decision | piko landing / rationale |
-|---|---|---|
-| Rollout/transcript inspection | kept (adapted) | Transcript is one lens over piko's journal-backed ancestry, not the authority for Agent work. |
-| Runtime trace inspection | rejected as the history authority | Required journal facts provide the skeleton; optional diagnostics enrich it. |
-
-## Open questions
-
-1. None for this feature. Export and comparison remain later product
-   decisions. Web-viewer retirement is ADR-029.
+| Primary concept? | One flat per-agent time stream with a lane strip | Answers "what happened, in order" without pre-selecting work closures. |
+| What is authoritative? | Required journal facts | Unchanged from the previous design; diagnostics enrich only. |
+| Multiple agents? | Separate streams via an agent selector | User decision 2026-09-13; avoids interleaving unrelated agent chatter. |
+| Live following? | No; explicit refresh | User decision 2026-09-13; historical review is the use case. |
+| Former lenses? | Deleted (Transcript, Journal, Work, Agents) | User decision 2026-09-13; cut scope, keep one strong view. |
+| Provenance filter? | Removed as user-facing control | Facts/diagnostics split stays internal for detail enrichment. |
+| Work grouping? | Not a navigation level anymore | The stream spans works; grouping is internal only. |
 
 ## Reference evidence
 
 - [F-31 durable session journal](F-31-durable-session-journal.md)
-- [F-36 agent run trajectory](F-36-agent-run-trajectory.md)
 - [F-37 materialized read models](F-37-materialized-read-models.md)
 - [F-48 authoritative agent lifecycle](F-48-authoritative-agent-lifecycle.md)
 - [F-51 agent work lifecycle and control plane](F-51-agent-control-plane.md)
-- [ADR-027 agent work lifecycle](../decisions/ADR-027-agent-work-lifecycle.md)
+- [ADR-028 journal-derived session history](../decisions/ADR-028-journal-derived-session-history.md)
 - [ADR-029 retire trajectory web viewer](../decisions/ADR-029-retire-trajectory-web-viewer.md)

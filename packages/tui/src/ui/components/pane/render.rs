@@ -72,14 +72,14 @@ pub fn prepare_pane(area: Rect, spec: &PaneSpec<'_>) -> Option<PanePlan> {
 
     // Content starts below the top padding.
     let content_top = frame.y.saturating_add(pad.vertical);
-    // Footer anchors to the frame bottom (flush to the border). The vertical
-    // padding doubles as the separator between content/tip and the footer;
-    // without a footer it leaves a breathing row.
+    // Footer anchors to the frame bottom (flush to the border). The tip line
+    // sits directly above the footer (breadcrumb reads together with the
+    // hints); the vertical padding becomes the breathing row between the
+    // content and the tip instead.
     let footer_top = frame
         .y
         .saturating_add(frame.height.saturating_sub(footer_h));
-    let gap_top = footer_top.saturating_sub(pad.vertical);
-    let tip_top = gap_top.saturating_sub(u16::from(show_tip));
+    let tip_top = footer_top.saturating_sub(u16::from(show_tip));
 
     let mut y = content_top;
     let search = show_search.then(|| {
@@ -92,7 +92,12 @@ pub fn prepare_pane(area: Rect, spec: &PaneSpec<'_>) -> Option<PanePlan> {
         y = y.saturating_add(1);
         rect
     });
-    let content_height = tip_top.saturating_sub(y);
+    let content_bottom = if show_tip {
+        tip_top.saturating_sub(pad.vertical)
+    } else {
+        footer_top.saturating_sub(pad.vertical)
+    };
+    let content_height = content_bottom.saturating_sub(y);
     let content = Rect::new(zone_x, y, zone_w, content_height);
     let tip = show_tip.then_some(Rect::new(zone_x, tip_top, zone_w, 1));
     let footer = (footer_h > 0).then_some(Rect::new(zone_x, footer_top, zone_w, footer_h));

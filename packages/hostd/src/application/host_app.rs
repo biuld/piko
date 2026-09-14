@@ -48,6 +48,9 @@ pub struct HostApp {
     pub(crate) auth_logins: Arc<Mutex<HashMap<String, ActiveAuthLogin>>>,
     pub(crate) project_settings_path: Arc<Mutex<Option<PathBuf>>>,
     pub(crate) session_store_factory: Arc<dyn SessionStoreFactory>,
+    /// Read-model inspection cache for the trajectory surface, keyed by
+    /// session directory and validated by the published revision.
+    pub(crate) history_cache: super::InspectionCache,
     pub(crate) prompt_materials: Arc<dyn PromptMaterialLoader>,
     pub(crate) transcript_estimator: Arc<dyn TranscriptEstimator>,
 }
@@ -164,6 +167,7 @@ impl HostApp {
             session_store_factory: deps
                 .session_store_factory
                 .unwrap_or_else(Self::default_session_store_factory),
+            history_cache: Arc::new(Mutex::new(HashMap::new())),
             prompt_materials: deps
                 .prompt_materials
                 .unwrap_or_else(Self::default_prompt_materials),

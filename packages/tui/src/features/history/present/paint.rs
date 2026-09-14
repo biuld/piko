@@ -79,6 +79,45 @@ pub(super) fn kv(key: &str, value: impl Into<String>, theme: &Theme, width: u16)
     plain(format!("{key}  {}", value.into()), theme.text, width)
 }
 
+pub(super) fn field_lines(
+    key: &str,
+    value: impl AsRef<str>,
+    theme: &Theme,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let width = usize::from(width.max(1));
+    if width < 28 {
+        let mut lines = vec![plain(key, theme.muted, width as u16)];
+        lines.extend(wrapped(value.as_ref(), theme.text, width as u16));
+        return lines;
+    }
+    let key_width = 14usize.min(width.saturating_sub(1));
+    let value_width = width.saturating_sub(key_width).max(1);
+    let mut values = crate::ui::line_layout::soft_wrap(value.as_ref(), value_width);
+    if values.is_empty() {
+        values.push(String::new());
+    }
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let label = if index == 0 {
+                format!("{key:<key_width$}")
+            } else {
+                " ".repeat(key_width)
+            };
+            pad_spans(
+                vec![
+                    Span::styled(label, Style::default().fg(theme.muted)),
+                    Span::styled(value, Style::default().fg(theme.text)),
+                ],
+                Style::default(),
+                width as u16,
+            )
+        })
+        .collect()
+}
+
 pub(super) fn plain(text: impl Into<String>, color: Color, width: u16) -> Line<'static> {
     let text = truncate_cols(&text.into(), usize::from(width));
     pad_spans(

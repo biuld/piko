@@ -15,7 +15,9 @@ impl AppState {
             Some(SurfaceId::Thinking) => self.thinking.select_next(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_next(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_down(1),
-            Some(SurfaceId::History) => self.history.select_next(),
+            Some(SurfaceId::History) => {
+                self.history_move_selection(1);
+            }
             Some(SurfaceId::Todos) => self.todo_lists.scroll_down(1),
             Some(SurfaceId::Usage) => {
                 self.usage_scroll = self
@@ -39,7 +41,9 @@ impl AppState {
             Some(SurfaceId::Thinking) => self.thinking.select_prev(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_prev(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_up(1),
-            Some(SurfaceId::History) => self.history.select_prev(),
+            Some(SurfaceId::History) => {
+                self.history_move_selection(-1);
+            }
             Some(SurfaceId::Todos) => self.todo_lists.scroll_up(1),
             Some(SurfaceId::Usage) => {
                 self.usage_scroll = self.usage_scroll.saturating_sub(1);
@@ -133,25 +137,35 @@ impl AppState {
         }
     }
 
-    pub(super) fn select_surface_next(&mut self) {
+    pub(super) fn select_surface_next(&mut self) -> Vec<Effect> {
         match self.mode() {
             AppMode::Surface(SurfaceId::SummaryPrompt) => {
                 if let Some(workflow) = self.summary_prompt.as_mut() {
                     workflow.select_next();
                 }
+                Vec::new()
             }
-            _ => self.select_next(),
+            AppMode::Surface(SurfaceId::History) => self.history_move_selection(1),
+            _ => {
+                self.select_next();
+                Vec::new()
+            }
         }
     }
 
-    pub(super) fn select_surface_prev(&mut self) {
+    pub(super) fn select_surface_prev(&mut self) -> Vec<Effect> {
         match self.mode() {
             AppMode::Surface(SurfaceId::SummaryPrompt) => {
                 if let Some(workflow) = self.summary_prompt.as_mut() {
                     workflow.select_prev();
                 }
+                Vec::new()
             }
-            _ => self.select_prev(),
+            AppMode::Surface(SurfaceId::History) => self.history_move_selection(-1),
+            _ => {
+                self.select_prev();
+                Vec::new()
+            }
         }
     }
 
@@ -266,6 +280,21 @@ impl AppState {
         }
     }
 
+    /// Master-detail: in the wide layout, moving the selection loads the new
+    /// row's detail into the right pane without an explicit open action.
+    fn history_move_selection(&mut self, delta: isize) -> Vec<Effect> {
+        let before = self.history.selected;
+        if delta >= 0 {
+            self.history.select_next();
+        } else {
+            self.history.select_prev();
+        }
+        if self.history.is_wide() && self.history.selected != before {
+            return self.request_history_detail(false);
+        }
+        Vec::new()
+    }
+
     fn confirm_history_selection(&mut self) -> Vec<Effect> {
         if self.history.loading || self.history.detail_loading {
             return Vec::new();
@@ -281,53 +310,68 @@ impl AppState {
             };
             return self.open_history(Some(session.session_id));
         }
-        let Some(session_id) = self.history.session_id.clone() else {
-            return Vec::new();
-        };
-        let Some(overview) = self.history.overview.as_ref() else {
-            return Vec::new();
-        };
-        if self.history.lens == crate::features::history::HistoryLens::Agents
-            && self.history.agent_id.is_none()
-        {
-            if let Some(agent_id) = self.history.selected_agent_id() {
-                self.history.drill_into_agent(agent_id);
-            }
-            return Vec::new();
-        }
-        if self.history.work.is_none()
-            && matches!(
-                self.history.lens,
-                crate::features::history::HistoryLens::Work
-                    | crate::features::history::HistoryLens::Agents
-            )
-        {
-            let Some(root_input_id) = self.history.selected_work_id() else {
+        if self.history.agent_choosing {
+            let Some(agent_id) = self.history.selected_agent_id() else {
                 return Vec::new();
             };
-            return self.history_request(Command::SessionHistoryWorkPageGet {
-                command_id: command_id(),
-                session_id,
-                root_input_id,
-                expected_revision: overview.revision,
-                after_cursor: None,
-                limit: Some(200),
-            });
+            self.history.agent_choosing = false;
+            let changed = self.history.agent_id.as_deref() != Some(agent_id.as_str());
+            self.history.select_agent(agent_id);
+            return if changed {
+                self.fetch_history_agent()
+            } else {
+                Vec::new()
+            };
         }
-        if let Some(item_ref) = self.history.selected_item_ref() {
-            return self.history_request(Command::SessionHistoryItemGet {
-                command_id: command_id(),
-                session_id,
-                item_ref,
-            });
-        }
+        self.open_history_detail()
+    }
+
+    /// Fetch the selected row's recorded detail for the tabbed pane. Rapid
+    /// selection changes coalesce: only one fetch is in flight, the newest
+    /// wanted row is queued and requested when the current one lands.
+    pub(in crate::app) fn open_history_detail(&mut self) -> Vec<Effect> {
+        self.request_history_detail(true)
+    }
+
+    fn request_history_detail(&mut self, focus_detail: bool) -> Vec<Effect> {
+        let Some(item_ref) = self.history.selected_item_ref() else {
+            return Vec::new();
+        };
         self.history.opened_row = self
             .history
             .visible_rows()
             .get(self.history.selected)
             .cloned();
-        self.history.active_pane = crate::ui::components::split_pane::PaneSide::Second;
-        Vec::new()
+        if focus_detail || !self.history.is_wide() {
+            self.history.active_pane = crate::ui::components::split_pane::PaneSide::Second;
+        }
+        if let Some(detail) = self
+            .history
+            .detail_cache
+            .get(&item_ref.token)
+            .filter(|detail| detail.item_ref.revision == item_ref.revision)
+            .cloned()
+        {
+            self.history.set_detail(detail);
+            return Vec::new();
+        }
+        if self
+            .history
+            .detail
+            .as_ref()
+            .is_some_and(|detail| detail.item_ref == item_ref)
+        {
+            return Vec::new();
+        }
+        if self.history.detail_loading {
+            self.history.detail_queued = Some(item_ref);
+            return Vec::new();
+        }
+        self.history_request(Command::SessionHistoryItemGet {
+            command_id: command_id(),
+            session_id: self.history.session_id.clone().unwrap_or_default(),
+            item_ref,
+        })
     }
 
     fn confirm_process_stop(&mut self) -> Vec<Effect> {

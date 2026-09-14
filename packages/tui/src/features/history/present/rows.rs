@@ -1,23 +1,19 @@
-use piko_protocol::{
-    HistoryAvailability, HistoryItemSummary, HistoryProvenance, HistoryWorkSummary,
-};
-
-use super::super::{HistoryLens, HistoryRow};
-use super::labels::{
-    compact_usage, format_clock, kind_color, kind_label, lifecycle_color, lifecycle_label,
-    origin_word, outcome_color, outcome_word, pad_kind, producer_label,
-};
+use super::super::HistoryRow;
+use super::labels::{format_duration, lifecycle_color, lifecycle_label};
 use super::paint::scan_row;
 use crate::features::short_id;
 use crate::theme::Theme;
-use ratatui::text::Line;
+use crate::ui::line_layout::{pad_spans, paint_cols, truncate_cols};
+use ratatui::{
+    style::{Modifier, Style},
+    text::{Line, Span},
+};
 
-pub(crate) fn empty_copy(lens: HistoryLens) -> &'static str {
-    match lens {
-        HistoryLens::Work => "No root work in this session.",
-        HistoryLens::Agents => "No agents recorded in this session.",
-        HistoryLens::Transcript => "No transcript entries in this session.",
-        HistoryLens::Journal => "No journal commits in this session.",
+pub(crate) fn empty_copy(agent_choosing: bool) -> &'static str {
+    if agent_choosing {
+        "No agents recorded in this session."
+    } else {
+        "No trajectory rows recorded for this agent."
     }
 }
 
@@ -41,15 +37,13 @@ pub(crate) fn row_line(
                 Some((session.cwd.as_str(), theme.muted)),
             )
         }
-        HistoryRow::Work(work) => work_row(width, selected, work, theme),
         HistoryRow::Agent { agent, depth } => {
             let indent = "  ".repeat((*depth as usize).min(usize::from(width) / 10));
-            let origin = match (&agent.origin, &agent.origin_availability) {
-                (Some(_), _) => "spawned",
-                (_, HistoryAvailability::Unavailable { .. }) => "origin unknown",
-                _ => "root",
-            };
-            let right = format!("{} work · {origin}", agent.work_count);
+            let right = format!(
+                "{} work · {}",
+                agent.work_count,
+                lifecycle_label(agent.lifecycle)
+            );
             scan_row(
                 width,
                 selected,
@@ -65,134 +59,82 @@ pub(crate) fn row_line(
                 Some((right.as_str(), theme.muted)),
             )
         }
-        HistoryRow::Item { item, depth } => item_row(width, selected, theme, item, *depth),
-        HistoryRow::Transcript(item) => {
-            let indent = "  ".repeat((item.depth as usize).min(usize::from(width) / 10));
-            let mark = if item.selected { "* " } else { "  " };
-            let mut right = Vec::new();
-            if item.off_branch {
-                right.push("off branch");
-            } else if item.selected {
-                right.push("current");
-            }
-            let right = right.join(" · ");
-            scan_row(
-                width,
-                selected,
-                theme,
-                vec![
-                    (indent, theme.dim),
-                    (mark.to_string(), theme.accent),
-                    (
-                        pad_kind(kind_label(&item.kind.0)),
-                        kind_color(&item.kind.0, HistoryProvenance::Fact, theme),
-                    ),
-                    (item.summary.clone(), theme.text),
-                ],
-                (!right.is_empty()).then_some((right.as_str(), theme.muted)),
-            )
-        }
-        HistoryRow::CommitHeader {
-            revision,
-            producer,
-            events,
-            committed_at,
-        } => {
-            let mut right = format!("{events} events");
-            if let Some(clock) = format_clock(*committed_at) {
-                right = format!("{right} · {clock}");
-            }
-            scan_row(
-                width,
-                selected,
-                theme,
-                vec![
-                    (format!("r{revision}  "), theme.accent),
-                    (producer_label(producer), theme.text_secondary),
-                ],
-                Some((right.as_str(), theme.muted)),
-            )
-        }
+        HistoryRow::Stream(item) => stream_row(width, selected, theme, item),
     }
 }
 
-fn work_row(width: u16, selected: bool, work: &HistoryWorkSummary, theme: &Theme) -> Line<'static> {
-    let status = work.outcome.map(outcome_word).unwrap_or("unknown");
-    let status_color = work
-        .outcome
-        .map(|outcome| outcome_color(outcome, theme))
-        .unwrap_or(theme.muted);
-    let mut counts = Vec::new();
-    if work.step_count > 0 {
-        counts.push(format!("{} steps", work.step_count));
-    }
-    if work.tool_count > 0 {
-        counts.push(format!("{} tools", work.tool_count));
-    }
-    if work.message_count > 0 {
-        counts.push(format!("{} msgs", work.message_count));
-    }
-    if let Some(usage) = &work.usage {
-        counts.push(format!("{} tokens", compact_usage(usage)));
-    }
-    let right = counts.join(" · ");
-    scan_row(
-        width,
-        selected,
-        theme,
-        vec![
-            (format!("{status:<9} "), status_color),
-            (format!("{}  ", origin_word(work.origin)), theme.muted),
-            (work.input_preview.clone(), theme.text),
-        ],
-        (!right.is_empty()).then_some((right.as_str(), theme.muted)),
-    )
-}
-
-fn item_row(
+fn stream_row(
     width: u16,
     selected: bool,
     theme: &Theme,
-    item: &HistoryItemSummary,
-    depth: u32,
+    item: &piko_protocol::HistoryStreamItem,
 ) -> Line<'static> {
-    let indent = "  ".repeat((depth as usize).min(usize::from(width) / 10));
-    let summary_color = match item.availability {
-        HistoryAvailability::Unavailable { .. } => theme.warning,
-        HistoryAvailability::Available if item.provenance == HistoryProvenance::Diagnostic => {
-            theme.muted
-        }
-        HistoryAvailability::Available => theme.text,
+    if item.kind.0 == "model_step" {
+        return step_ending_marker(width, selected, theme, item);
+    }
+    let color = badge_color(&item.badge, theme);
+    let mut left = vec![(format!("{:<9}  ", item.badge), color)];
+    left.push((item.summary.clone(), theme.text));
+    // Duration rides on joined diagnostics; a bare journal revision stays in
+    // the detail instead of cluttering every row.
+    let right = item.duration_ms.map(format_duration);
+    let right = right.as_deref().map(|text| (text, theme.dim));
+    scan_row(width, selected, theme, left, right)
+}
+
+fn step_ending_marker(
+    width: u16,
+    selected: bool,
+    theme: &Theme,
+    item: &piko_protocol::HistoryStreamItem,
+) -> Line<'static> {
+    let fill = if selected {
+        Style::default().bg(theme.bg_selected)
+    } else {
+        Style::default()
     };
-    let provenance = match item.provenance {
-        HistoryProvenance::Fact => "fact",
-        HistoryProvenance::Diagnostic => "diag",
+    let marker = if selected { "› " } else { "  " };
+    let step = item
+        .badge
+        .strip_prefix("STEP ")
+        .map(|index| format!("Step {index}"))
+        .unwrap_or_else(|| "Step".into());
+    let duration = item
+        .duration_ms
+        .map(format_duration)
+        .map(|duration| format!(" · {duration}"))
+        .unwrap_or_default();
+    let available = usize::from(width).saturating_sub(paint_cols(marker));
+    let label = truncate_cols(
+        &format!("── {step} ended · {}{duration} ", item.summary),
+        available,
+    );
+    let rule = "─".repeat(available.saturating_sub(paint_cols(&label)));
+    let label_style = if selected {
+        fill.fg(theme.text_secondary).add_modifier(Modifier::BOLD)
+    } else {
+        fill.fg(theme.text_secondary)
     };
-    let unavailable = matches!(item.availability, HistoryAvailability::Unavailable { .. });
-    let right = match (item.provenance, &item.availability) {
-        (_, HistoryAvailability::Unavailable { .. }) => String::new(),
-        (HistoryProvenance::Diagnostic, _) => String::new(),
-        (HistoryProvenance::Fact, _) => format!("r{}", item.revision),
-    };
-    scan_row(
-        width,
-        selected,
-        theme,
+    pad_spans(
         vec![
-            (
-                format!(
-                    "{provenance}{} ",
-                    if unavailable { " unavailable" } else { "" }
-                ),
-                summary_color,
+            Span::styled(
+                marker.to_string(),
+                fill.fg(if selected { theme.accent } else { theme.dim }),
             ),
-            (indent, theme.dim),
-            (
-                format!("{} · ", kind_label(&item.kind.0)),
-                kind_color(&item.kind.0, item.provenance, theme),
-            ),
-            (item.summary.clone(), summary_color),
+            Span::styled(label, label_style),
+            Span::styled(rule, fill.fg(theme.border_muted)),
         ],
-        Some((right.as_str(), theme.dim)),
+        fill,
+        width,
     )
+}
+
+fn badge_color(badge: &str, theme: &Theme) -> ratatui::style::Color {
+    match badge {
+        "USER" | "CONTEXT" => theme.accent_user,
+        "ASSISTANT" => theme.accent_assistant,
+        "TOOL" | "RESULT" => theme.accent_tool,
+        "AGENT" | "SYSTEM" => theme.info,
+        _ => theme.text_secondary,
+    }
 }

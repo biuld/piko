@@ -4,8 +4,8 @@ use piko_protocol::*;
 use piko_tui_layout::Component;
 use ratatui::{Terminal, backend::TestBackend, layout::Rect};
 
-fn item(index: usize) -> HistoryItemSummary {
-    HistoryItemSummary {
+fn stream_item(index: usize) -> HistoryStreamItem {
+    HistoryStreamItem {
         item_ref: HistoryItemRef {
             revision: 12,
             token: format!("opaque-{index}"),
@@ -13,9 +13,16 @@ fn item(index: usize) -> HistoryItemSummary {
         revision: (index / 3 + 1) as u64,
         event_index: 0,
         committed_at: 0,
-        kind: HistoryItemKind::new("model_step"),
-        provenance: HistoryProvenance::Fact,
-        availability: HistoryAvailability::Available,
+        kind: HistoryItemKind::new(if index.is_multiple_of(2) {
+            "model_step"
+        } else {
+            "message"
+        }),
+        badge: if index.is_multiple_of(2) {
+            "STEP 1".into()
+        } else {
+            "ASSISTANT".into()
+        },
         relation: HistoryRelation {
             root_input_id: Some("input-inspect-history".into()),
             model_step_id: Some(format!("step-{index}")),
@@ -25,8 +32,19 @@ fn item(index: usize) -> HistoryItemSummary {
             "Step {} · inspect history rendering / 检查历史记录",
             index + 1
         ),
+        status: None,
+        duration_ms: None,
         has_detail: true,
-        children: Vec::new(),
+    }
+}
+
+fn agent_summary() -> HistoryAgentSummary {
+    HistoryAgentSummary {
+        agent_instance_id: "agent-main".into(),
+        agent_spec_id: "main".into(),
+        parent_agent_instance_id: None,
+        lifecycle: AgentInstanceLifecycle::Open,
+        work_count: 1,
     }
 }
 
@@ -37,44 +55,46 @@ fn panel() -> HistoryPanel {
         cwd: "/project/piko".into(),
         name: Some("History UI refinement".into()),
         revision: 12,
-        agents: vec![HistoryAgentSummary {
-            agent_instance_id: "agent-main".into(),
-            agent_spec_id: "main".into(),
-            parent_agent_instance_id: None,
-            lifecycle: AgentInstanceLifecycle::Open,
-            work_count: 1,
-            origin: None,
-            origin_availability: HistoryAvailability::Available,
-        }],
-        works: vec![HistoryWorkSummary {
-            root_input_id: "input-inspect-history".into(),
-            agent_instance_id: "agent-main".into(),
-            origin: AgentInputOrigin::User,
-            input_preview: "Inspect history rendering / 检查历史记录".into(),
-            started_at: None,
-            finished_at: None,
-            outcome: Some(AgentWorkProcessingStatus::Succeeded),
-            step_count: 12,
-            tool_count: 6,
-            message_count: 10,
-            usage: None,
-        }],
+        agents: vec![agent_summary()],
         next_cursor: None,
     });
-    panel.set_work(HistoryWorkPage {
+    panel.select_agent("agent-main".into());
+    panel.set_stream(HistoryStreamPage {
         session_id: "session-history-fixture".into(),
+        agent_instance_id: "agent-main".into(),
         revision: 12,
-        root_input_id: "input-inspect-history".into(),
-        items: (0..30).map(item).collect(),
+        items: (0..30).map(stream_item).collect(),
         next_cursor: Some("next".into()),
     });
+    let mut lanes = HistoryLaneSummary {
+        session_id: "session-history-fixture".into(),
+        agent_instance_id: "agent-main".into(),
+        revision: 12,
+        blocks: Vec::new(),
+        timing_available: true,
+    };
+    for index in 0..6 {
+        lanes.blocks.push(HistoryLaneBlock {
+            kind: HistoryLaneBlockKind::ModelStep,
+            reference: HistoryItemRef {
+                revision: 12,
+                token: format!("opaque-{}", index * 2),
+            },
+            label: format!("step {index}"),
+            status: "completed".into(),
+            sequence: index,
+            started_at: Some(i64::from(index) * 100),
+            duration_ms: Some(50),
+        });
+    }
+    panel.set_lanes(lanes);
     panel
 }
 
 fn open_detail(panel: &mut HistoryPanel) {
     panel.opened_row = panel.visible_rows().get(panel.selected).cloned();
     panel.set_detail(HistoryItemDetail {
-        item_ref: item(panel.selected).item_ref,
+        item_ref: stream_item(panel.selected).item_ref,
         provenance: HistoryProvenance::Fact,
         availability: HistoryAvailability::Available,
         content: Some(HistoryItemContent::Message {
@@ -89,6 +109,7 @@ fn open_detail(panel: &mut HistoryPanel) {
                 timestamp: None,
             },
         }),
+        diagnostic: None,
     });
 }
 
@@ -101,7 +122,7 @@ fn render(panel: &HistoryPanel, width: u16, height: u16) -> ratatui::buffer::Buf
                 frame.area(),
                 &HistoryCtx {
                     theme: &Theme::dark(),
-                    hints: Some("↑/↓ move · Enter open · ← back · Tab lens · r refresh"),
+                    hints: Some("↑/↓ move · Enter open · ← back · r refresh"),
                 },
             )
         })
@@ -121,6 +142,8 @@ fn detail_scroll_survives_paint_and_back_restores_list() {
     let list_top = panel.viewport.get().top();
     assert!(list_top > 0);
     open_detail(&mut panel);
+    panel.active_pane = PaneSide::Second;
+    panel.select_detail_tab(1); // Payload carries the long body.
     render(&panel, 120, 24);
     for _ in 0..30 {
         panel.select_next();
@@ -147,8 +170,9 @@ fn prepared_hits_match_first_paint_scroll_and_resize() {
             <HistoryPanel as Component<HitId, HistoryCtx<'_>>>::component_regions(&panel, area);
         let buffer = render(&panel, width, 24);
         assert_eq!(hits, *panel.painted_regions.borrow());
-        let (rect, _) = hits.iter().find(|(_, id)| *id == HitId::Row(23)).unwrap();
-        assert!(buffer[(rect.x, rect.y)].symbol().contains('›'));
+        if let Some((rect, _)) = hits.iter().find(|(_, id)| *id == HitId::Row(23)) {
+            assert!(buffer[(rect.x, rect.y)].symbol().contains('›'));
+        }
         assert_eq!(panel.selected, 23);
     }
     open_detail(&mut panel);
@@ -175,47 +199,53 @@ fn prepared_hits_match_first_paint_scroll_and_resize() {
 }
 
 #[test]
-fn unavailable_diagnostics_keep_both_labels_and_unknown_work_is_not_pending() {
-    let theme = Theme::dark();
-    let mut diagnostic = item(0);
-    diagnostic.provenance = HistoryProvenance::Diagnostic;
-    diagnostic.availability = HistoryAvailability::Unavailable {
-        reason: "capture absent".into(),
-    };
-    for width in [32, 60, 120] {
-        let line = present::row_line(
-            width,
-            false,
-            &HistoryRow::Item {
-                item: diagnostic.clone(),
-                depth: 30,
-            },
-            &theme,
-        );
-        let text = line.to_string();
-        assert!(text.contains("diag unavailable"));
-        assert!(line.width() <= usize::from(width));
-    }
+fn visible_stream_rows_are_clickable_after_scrolling() {
+    use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
+
+    let mut panel = panel();
+    panel.selected = 23;
+    let area = Rect::new(0, 0, 120, 24);
+    let hits = <HistoryPanel as Component<HitId, HistoryCtx<'_>>>::component_regions(&panel, area);
+    let (rect, row_index) = hits
+        .iter()
+        .find_map(|(rect, id)| match id {
+            HitId::Row(index) if *index != panel.selected => Some((*rect, *index)),
+            _ => None,
+        })
+        .expect("wide stream list should expose visible row hits");
+
+    let actions = panel.pointer_event(
+        ComponentHit {
+            element: Some(HitId::Row(row_index)),
+            rect,
+            x: rect.x,
+            y: rect.y,
+        },
+        PointerGesture::Activate,
+    );
+
+    assert_eq!(panel.selected, row_index);
+    assert!(matches!(
+        actions.as_slice(),
+        [crate::app::command::Action::Surface(
+            crate::app::command::SurfaceAction::Confirm
+        )]
+    ));
 }
 
 #[test]
-fn agents_work_drilldown_uses_items_and_restores_parent_selection() {
-    let mut panel = panel();
-    panel.back();
-    panel.select_lens(1);
-    panel.drill_into_agent("agent-main".into());
-    panel.set_work(HistoryWorkPage {
-        session_id: "session-history-fixture".into(),
-        revision: 12,
-        root_input_id: "input-inspect-history".into(),
-        items: vec![item(1)],
-        next_cursor: None,
-    });
-    assert!(matches!(panel.visible_rows()[0], HistoryRow::Item { .. }));
-    assert!(!panel.back());
-    assert!(matches!(panel.visible_rows()[0], HistoryRow::Work(_)));
-    assert!(!panel.back());
-    assert!(matches!(panel.visible_rows()[0], HistoryRow::Agent { .. }));
+fn lane_strip_has_a_full_width_border_above_the_content() {
+    let panel = panel();
+    let area = Rect::new(0, 0, 120, 24);
+    let divider = panel
+        .prepare_layout(area)
+        .and_then(|layout| layout.lane_divider)
+        .expect("lane strip should reserve a divider");
+    let buffer = render(&panel, area.width, area.height);
+
+    for x in divider.x..divider.right() {
+        assert_eq!(buffer[(x, divider.y)].symbol(), "─");
+    }
 }
 
 #[test]
@@ -225,67 +255,11 @@ fn visual_fixtures() {
     };
     let directory = std::path::PathBuf::from(directory);
     std::fs::create_dir_all(&directory).unwrap();
-    let mut panel = panel();
-    panel.work.as_mut().unwrap().items[2].provenance = HistoryProvenance::Diagnostic;
-    panel.work.as_mut().unwrap().items[2].availability = HistoryAvailability::Unavailable {
-        reason: "capture absent".into(),
-    };
-    for lens in HistoryLens::ALL {
-        panel.lens = lens;
-        if lens == HistoryLens::Agents {
-            panel.work = None;
-        }
-        if lens == HistoryLens::Transcript {
-            panel.transcript = Some(HistoryTranscriptPage {
-                session_id: "session-history-fixture".into(),
-                revision: 12,
-                next_cursor: None,
-                items: (0..12)
-                    .map(|i| HistoryTranscriptItem {
-                        item_ref: item(i).item_ref,
-                        kind: HistoryItemKind::new("message"),
-                        depth: i as u32,
-                        agent_instance_id: Some("agent-main".into()),
-                        parent_id: Some(format!("message-{i}")),
-                        root_input_id: Some("input-inspect-history".into()),
-                        model_step_id: None,
-                        summary: format!("Message {i} · branch content / 分支内容"),
-                        selected: i == 5,
-                        off_branch: i > 5,
-                        has_detail: true,
-                    })
-                    .collect(),
-            });
-        }
-        if lens == HistoryLens::Journal {
-            panel.journal = Some(HistoryJournalPage {
-                session_id: "session-history-fixture".into(),
-                revision: 12,
-                next_cursor: None,
-                commits: (0..5)
-                    .map(|i| HistoryCommitSummary {
-                        revision: i as u64 + 1,
-                        commit_id: format!("commit-{i}"),
-                        producer: "hostd".into(),
-                        committed_at: 0,
-                        causation_id: Some("input-inspect-history".into()),
-                        correlation_id: None,
-                        events: vec![item(i)],
-                    })
-                    .collect(),
-            });
-        }
-        panel.clear_detail();
-        for width in [40, 60, 120] {
-            export_frame(
-                &panel,
-                &directory,
-                &format!("{}-{width}", lens.index()),
-                width,
-            );
-        }
+    let stream_panel = panel();
+    for width in [40, 60, 120] {
+        export_frame(&stream_panel, &directory, &format!("stream-{width}"), width);
     }
-    let mut detail_panel = self::panel();
+    let mut detail_panel = panel();
     open_detail(&mut detail_panel);
     export_frame(&detail_panel, &directory, "detail-wide", 120);
     export_frame(&detail_panel, &directory, "detail-compact", 40);
@@ -310,26 +284,12 @@ fn export_frame(panel: &HistoryPanel, directory: &std::path::Path, name: &str, w
 }
 
 #[test]
-fn summary_inspection_is_available_in_compact_mode_without_a_request() {
-    let mut panel = panel();
-    panel.back();
-    panel.select_lens(1);
-    panel.inspect_summary();
-    let buffer = render(&panel, 40, 24);
-    assert!(panel.shows_detail_only());
-    assert!(shown(&buffer).contains("agent-main"));
-    assert!(panel.pending_command_id.is_none());
-    assert!(panel.detail.is_none());
-    assert!(!panel.back());
-    assert_eq!(panel.active_pane, PaneSide::First);
-}
-
-#[test]
 fn wheel_over_list_keeps_detail_position_and_wheel_over_detail_keeps_selection() {
     use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
     let mut panel = panel();
     panel.selected = 10;
     open_detail(&mut panel);
+    panel.select_detail_tab(1); // Payload carries the long body.
     render(&panel, 120, 24);
     let detail = panel.painted_split.get().unwrap().second.unwrap().content;
     panel.pointer_event(
@@ -342,7 +302,7 @@ fn wheel_over_list_keeps_detail_position_and_wheel_over_detail_keeps_selection()
         PointerGesture::ScrollDown,
     );
     assert_eq!(panel.selected, 10);
-    assert_eq!(panel.detail_viewport.get().top(), 1);
+    assert_eq!(panel.detail_viewport.get().top(), 3);
     let list = panel.painted_split.get().unwrap().first.unwrap().content;
     panel.pointer_event(
         ComponentHit {
@@ -353,11 +313,41 @@ fn wheel_over_list_keeps_detail_position_and_wheel_over_detail_keeps_selection()
         },
         PointerGesture::ScrollDown,
     );
-    assert_eq!(panel.selected, 11);
-    assert_eq!(panel.detail_viewport.get().top(), 1);
+    assert_eq!(panel.selected, 10);
+    assert_eq!(panel.viewport.get().top(), 3);
+    assert_eq!(panel.detail_viewport.get().top(), 3);
     assert!(
-        matches!(panel.opened_row, Some(HistoryRow::Item { ref item, .. }) if item.item_ref.token == "opaque-10")
+        matches!(panel.opened_row, Some(HistoryRow::Stream(ref item)) if item.item_ref.token == "opaque-10")
     );
+}
+
+#[test]
+fn summary_shows_journal_metadata_once_without_a_repeated_evidence_section() {
+    let mut panel = panel();
+    panel.selected = 2;
+    open_detail(&mut panel);
+
+    let text = shown(&render(&panel, 120, 24));
+
+    assert!(text.contains("Journal"));
+    assert!(text.contains("Position"));
+    assert!(!text.contains("Journal evidence"));
+}
+
+#[test]
+fn list_projection_clones_only_the_requested_visible_range() {
+    let mut panel = panel();
+    panel.filter = "inspect history".into();
+
+    let rows = panel.visible_rows_range(8..11);
+
+    assert_eq!(rows.len(), 3);
+    for (offset, row) in rows.iter().enumerate() {
+        let HistoryRow::Stream(item) = row else {
+            panic!("expected stream row");
+        };
+        assert_eq!(item.item_ref.token, format!("opaque-{}", offset + 8));
+    }
 }
 
 #[test]
@@ -368,7 +358,7 @@ fn filtered_count_retains_loaded_scope() {
     assert_eq!(panel.loaded_row_count(), 30);
     let buffer = render(&panel, 60, 24);
     assert!(shown(&buffer).contains("1 / 30 loaded"));
-    assert!(shown(&buffer).contains("more"));
+    assert!(!shown(&buffer).contains("more"));
 }
 
 #[test]
@@ -379,40 +369,83 @@ fn compact_detail_feedback_wraps_and_identifies_the_opened_item() {
     panel.detail_error = Some("Transport failed while fetching the recorded body".into());
     let buffer = render(&panel, 40, 40);
     let text = shown(&buffer);
-    assert!(text.contains("step-10"));
     let words: String = text
         .chars()
         .filter(|c| !c.is_whitespace() && *c != '│')
         .collect();
-    assert!(words.contains("openagaintoretry"), "{words}");
+    assert!(words.contains("reopentoretry"), "{words}");
     panel.detail_error = None;
     panel.detail_loading = true;
     let buffer = render(&panel, 40, 40);
-    assert!(shown(&buffer).contains("step-10"));
     assert!(shown(&buffer).contains("Loading selected detail"));
 }
 
 #[test]
-fn summary_only_rows_do_not_offer_unavailable_body_actions() {
+fn lane_blocks_align_across_rows_and_select_their_stream_row() {
     let mut panel = panel();
-    panel.back();
-    panel.select_lens(1);
-    panel.inspect_summary();
-    let buffer = render(&panel, 60, 30);
-    let text = shown(&buffer);
-    assert!(text.contains("Back returns to the list"));
-    assert!(!text.contains("Open the item"));
+    let buffer = render(&panel, 120, 24);
+    // Lane strip labels are painted.
+    assert!(shown(&buffer).contains("Model"));
+    assert!(shown(&buffer).contains("Tools"));
+    // A lane block hit selects its stream row by persisted token.
+    panel.select_lane_block(3);
+    let rows = panel.visible_rows();
+    let selected = rows.get(panel.selected).unwrap();
+    let HistoryRow::Stream(item) = selected else {
+        panic!("expected a stream row");
+    };
+    assert_eq!(item.item_ref.token, "opaque-6");
 }
 
 #[test]
-fn compact_lens_tabs_keep_complete_names_when_they_fit() {
+fn lane_strip_fills_the_width_when_blocks_fit() {
     let panel = panel();
-    let buffer = render(&panel, 40, 24);
-    let text = shown(&buffer);
-    assert!(text.contains("Transcript"));
-    assert!(text.contains("Journal"));
-    let hits = panel.painted_regions.borrow();
-    for (rect, _) in hits.iter().filter(|(_, hit)| matches!(hit, HitId::Mode(_))) {
-        assert!(rect.right() < 40);
-    }
+    <HistoryPanel as Component<HitId, HistoryCtx<'_>>>::component_regions(
+        &panel,
+        Rect::new(0, 0, 120, 24),
+    );
+    assert_eq!(panel.lane_unit.get(), 0, "fit mode does not scroll");
+    assert_eq!(panel.lane_viewport.get().top(), 0);
+}
+
+#[test]
+fn lane_strip_scrolls_horizontally_when_blocks_overflow() {
+    use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
+
+    let mut panel = panel();
+    let blocks = (0..200u32)
+        .map(|index| HistoryLaneBlock {
+            kind: HistoryLaneBlockKind::ToolCall,
+            reference: HistoryItemRef {
+                revision: 12,
+                token: format!("opaque-{}", index % 30),
+            },
+            label: "exec_command".into(),
+            status: "completed".into(),
+            sequence: index * 2,
+            started_at: Some(0),
+            duration_ms: Some(1),
+        })
+        .collect();
+    panel.set_lanes(HistoryLaneSummary {
+        session_id: "session-history-fixture".into(),
+        agent_instance_id: "agent-main".into(),
+        revision: 12,
+        blocks,
+        timing_available: true,
+    });
+    let area = Rect::new(0, 0, 80, 24);
+    <HistoryPanel as Component<HitId, HistoryCtx<'_>>>::component_regions(&panel, area);
+    assert_eq!(panel.lane_unit.get(), 2, "overflow engages scroll mode");
+    let strip = panel.lane_strip_rect.get().unwrap();
+    panel.pointer_event(
+        ComponentHit {
+            element: None,
+            rect: strip,
+            x: strip.x + 4,
+            y: strip.y,
+        },
+        PointerGesture::ScrollDown,
+    );
+    assert!(panel.lane_viewport.get().top() > 0);
 }

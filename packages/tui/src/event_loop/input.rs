@@ -5,12 +5,14 @@ use crossterm::event::{self, Event as CrosstermEvent};
 
 use crate::{
     app::{
-        AppState,
-        command::{Action, TimelineAction},
+        AppState, SurfaceId,
+        command::{Action, PointerAction, PointerTarget, TimelineAction},
     },
     input::{batch::TimelineScrollBatch, focus::InputRouter},
     layout::PreparedFrame,
+    navigation::Region,
     terminal::InputNormalizer,
+    ui::interaction::PointerGesture,
 };
 
 use super::{CycleBudget, apply_action, effects::run_effects};
@@ -80,6 +82,11 @@ pub(super) fn drain_input(
                                             state_changed = true;
                                         }
                                     }
+                                    action if is_history_scroll(&action) => {
+                                        flush_timeline_scroll(app, host, &mut timeline_scroll);
+                                        apply_action(app, host, action);
+                                        state_changed = true;
+                                    }
                                     action => {
                                         flush_timeline_scroll(app, host, &mut timeline_scroll);
                                         apply_action(app, host, action);
@@ -122,6 +129,19 @@ pub(super) fn drain_input(
     Ok(state_changed)
 }
 
+fn is_history_scroll(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::Pointer(PointerAction::Gesture {
+            target: PointerTarget::Component {
+                region: Region::Surface(SurfaceId::History),
+                ..
+            },
+            gesture: PointerGesture::ScrollUp | PointerGesture::ScrollDown,
+        })
+    )
+}
+
 fn flush_timeline_scroll(
     app: &mut AppState,
     host: &mut HostdClient,
@@ -144,4 +164,48 @@ pub(super) fn drain_host(app: &mut AppState, host: &mut HostdClient, budget: Cyc
     }
     app.end_host_batch();
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::HitId;
+    use piko_tui_layout::ComponentHit;
+    use ratatui::layout::Rect;
+
+    fn gesture(surface: SurfaceId, gesture: PointerGesture) -> Action {
+        PointerAction::Gesture {
+            target: PointerTarget::Component {
+                region: Region::Surface(surface),
+                hit: ComponentHit {
+                    element: Some(HitId::Content),
+                    rect: Rect::new(0, 0, 10, 10),
+                    x: 1,
+                    y: 1,
+                },
+            },
+            gesture,
+        }
+        .into()
+    }
+
+    #[test]
+    fn history_wheel_gestures_are_safe_to_drain_before_paint() {
+        assert!(is_history_scroll(&gesture(
+            SurfaceId::History,
+            PointerGesture::ScrollUp
+        )));
+        assert!(is_history_scroll(&gesture(
+            SurfaceId::History,
+            PointerGesture::ScrollDown
+        )));
+        assert!(!is_history_scroll(&gesture(
+            SurfaceId::Settings,
+            PointerGesture::ScrollDown
+        )));
+        assert!(!is_history_scroll(&gesture(
+            SurfaceId::History,
+            PointerGesture::Activate
+        )));
+    }
 }

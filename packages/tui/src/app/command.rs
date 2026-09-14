@@ -141,15 +141,12 @@ pub enum SurfaceAction {
     OpenUsage,
     OpenNotifications,
     OpenHistory(Option<String>),
-    HistoryLensPrevious,
-    HistoryLensNext,
-    HistorySelectLens(usize),
     HistoryRefresh,
-    HistoryInspect,
     HistoryChooseSession,
     HistoryFilter,
-    HistoryFactsOnly,
-    HistoryDiagnostics,
+    /// Select an agent stream by overview index.
+    HistorySelectAgent(usize),
+    HistoryDetailTab(usize),
     OpenTree,
     /// Session agent list → switch viewed agent (ComposerBand).
     OpenAgents,

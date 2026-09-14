@@ -39,6 +39,7 @@ pub use component::{
     UpstreamInfo, UserMessageComponent,
 };
 pub(crate) use layout::TimelineRenderPlan;
+pub(crate) use render::tool_lines;
 pub(crate) use selection::SelectionPoint;
 pub use store::TimelineStore;
 pub(crate) use thought::{THOUGHT_SPINNER, elapsed_ms, format_duration_ms, phase_duration_ms};

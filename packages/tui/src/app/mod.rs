@@ -71,8 +71,6 @@ pub enum HitId {
     TimelineThought(u64),
     /// One source row owned by a selectable surface.
     Row(usize),
-    /// Inspect the already loaded summary of a row.
-    Inspect(usize),
     /// An editable field owned by a surface.
     TextInput,
     /// A scrollable content viewport owned by a surface.
@@ -81,6 +79,8 @@ pub enum HitId {
     Close,
     /// One option in a pane title mode strip.
     Mode(usize),
+    /// One lane-strip block (block sequence index within the lane summary).
+    Lane(usize),
     /// A question tab in a multi-question workflow.
     Tab(usize),
     /// One choice row of the active question.

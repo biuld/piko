@@ -12,6 +12,7 @@ mod flex;
 mod focus;
 mod hitmap;
 mod interaction;
+mod lane;
 mod modal;
 mod padding;
 mod shell;
@@ -30,6 +31,7 @@ pub use flex::{
 pub use focus::FocusManager;
 pub use hitmap::{Component, Hit, HitMap, HitRegion, SurfacePanel, build_hitmap};
 pub use interaction::{ComponentHit, InteractionState, PointerGesture};
+pub use lane::{Lane, LaneExtent, LanePlan, LaneSegment, LaneStripPlan, solve_lane_strip};
 pub use modal::{ModalLayer, ModalPlacement};
 pub use padding::{
     Align, Gutter, GutterSide, Padding, Spacer, align, clip, intersection, split_gutter,

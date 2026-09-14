@@ -234,15 +234,13 @@ pub(crate) fn pane_hints(app: &AppState, surface: SurfaceId) -> PaneHints {
                     CommandId::SelectionPagePrevious,
                     CommandId::SelectionPageNext,
                 )
-                .map(|key| format!("{key} lens")),
-                binding_hint(app, CommandId::HistoryInspect).map(|key| format!("{key} inspect")),
+                .map(|key| format!("{key} page")),
                 binding_hint(app, CommandId::HistoryRefresh).map(|key| format!("{key} refresh")),
                 binding_hint(app, CommandId::HistoryChooseSession)
                     .map(|key| format!("{key} sessions")),
                 binding_hint(app, CommandId::HistoryFilter).map(|key| format!("{key} filter")),
-                binding_hint(app, CommandId::HistoryFactsOnly).map(|key| format!("{key} facts")),
-                binding_hint(app, CommandId::HistoryDiagnostics)
-                    .map(|key| format!("{key} diagnostic")),
+                binding_hint(app, CommandId::HistoryDetailTab).map(|key| format!("{key} tabs")),
+                binding_hint(app, CommandId::HistoryAgentNext).map(|key| format!("{key} agent")),
             ]),
         },
         SurfaceId::Usage | SurfaceId::Todos | SurfaceId::Diagnostics => PaneHints {
