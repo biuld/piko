@@ -72,6 +72,7 @@ impl AppState {
             Event::Model(event) => self.apply_model(event),
             Event::Usage(event) => self.apply_usage(event),
             Event::TodoListUpdated(updated) => self.apply_todo_list_updated(updated),
+            Event::Compaction(event) => self.apply_compaction(event),
         }
     }
 }

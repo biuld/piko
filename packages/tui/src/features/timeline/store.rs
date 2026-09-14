@@ -85,13 +85,22 @@ impl TimelineStore {
     pub fn ensure_inactive(&mut self, agent_instance_id: impl Into<String>) {
         let agent_instance_id = agent_instance_id.into();
         if !self.inactive.contains_key(&agent_instance_id) {
-            let timeline = Self::seeded_timeline(
-                &self.session_entries,
-                &self.model_step_boundaries,
-                &agent_instance_id,
-                self.active.thinking_visible,
-            );
+            let timeline = self.seeded_with_live_compaction(&agent_instance_id);
             self.inactive.insert(agent_instance_id, timeline);
+        }
+    }
+
+    pub fn start_compaction(&mut self, mode: piko_protocol::command::CompactMode) {
+        self.active.start_compaction(mode);
+        for timeline in self.inactive.values_mut() {
+            timeline.start_compaction(mode);
+        }
+    }
+
+    pub fn fail_compaction(&mut self, error: String) {
+        self.active.fail_compaction(error.clone());
+        for timeline in self.inactive.values_mut() {
+            timeline.fail_compaction(error.clone());
         }
     }
 
@@ -124,14 +133,10 @@ impl TimelineStore {
         if previous == Some(agent_instance_id) {
             return;
         }
-        let next = self.inactive.remove(agent_instance_id).unwrap_or_else(|| {
-            Self::seeded_timeline(
-                &self.session_entries,
-                &self.model_step_boundaries,
-                agent_instance_id,
-                self.active.thinking_visible,
-            )
-        });
+        let next = self
+            .inactive
+            .remove(agent_instance_id)
+            .unwrap_or_else(|| self.seeded_with_live_compaction(agent_instance_id));
         let previous_timeline = std::mem::replace(&mut self.active, next);
         if let Some(previous) = previous {
             self.inactive
@@ -160,6 +165,18 @@ impl TimelineStore {
             self.session_entries.push((entry, order));
         }
         outcome
+    }
+
+    fn seeded_with_live_compaction(&self, agent_instance_id: &str) -> Timeline {
+        let mut timeline = Self::seeded_timeline(
+            &self.session_entries,
+            &self.model_step_boundaries,
+            agent_instance_id,
+            self.active.thinking_visible,
+        );
+        timeline.live_compaction = self.active.live_compaction.clone();
+        timeline.append_live_compaction();
+        timeline
     }
 
     fn seeded_timeline(

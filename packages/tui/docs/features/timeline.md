@@ -46,9 +46,10 @@ but it does not create a temporary duplicate prompt in Timeline.
 - Tools: separate cards with status-aware presentation; expand for typed detail.
 - Notices/errors/facts: compact, not mistaken for assistant prose.
 - Model / thinking / tool-set changes keep durable entry ids as fact rows;
-  compaction and branch summaries use summary components; displayable custom
-  messages use a custom component. Label, session-info, leaf, and non-display
-  custom metadata do not enter Timeline.
+  compaction is a status card (spinner while compacting, token chip when
+  done, error tone on failure); branch summaries stay compact notice lines;
+  displayable custom messages use a custom component. Label, session-info,
+  leaf, and non-display custom metadata do not enter Timeline.
 - Fenced code: editor-style numbered gutter, a two-cell content inset, and a
   recessed code surface; syntax color when language is known. The gutter uses
   alignment and color rather than a selectable separator glyph. Long lines

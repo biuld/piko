@@ -87,6 +87,69 @@ impl Timeline {
         self.bump_layout_epoch();
     }
 
+    pub(super) fn start_compaction(&mut self, mode: piko_protocol::command::CompactMode) {
+        if self.live_compaction.is_none() {
+            self.live_compaction = Some(super::component::LiveCompaction {
+                mode,
+                started_at: std::time::Instant::now(),
+                error: None,
+            });
+        }
+        self.ensure_live_compaction_visible();
+    }
+
+    pub(super) fn fail_compaction(&mut self, error: String) {
+        if let Some(live) = &mut self.live_compaction {
+            live.error = Some(error);
+        } else {
+            self.live_compaction = Some(super::component::LiveCompaction {
+                mode: piko_protocol::command::CompactMode::Summarize,
+                started_at: std::time::Instant::now(),
+                error: Some(error),
+            });
+        }
+        self.ensure_live_compaction_visible();
+    }
+
+    pub(super) fn finish_compaction(&mut self) {
+        if self.live_compaction.take().is_some() {
+            self.components
+                .retain(|component| component.id() != &ComponentId::LiveCompaction);
+            self.bump_layout_epoch();
+        }
+    }
+
+    pub(super) fn append_live_compaction(&mut self) {
+        let Some(component) = self
+            .live_compaction
+            .as_ref()
+            .map(super::component::LiveCompaction::to_component)
+        else {
+            return;
+        };
+        self.components.push_back(component);
+    }
+
+    fn ensure_live_compaction_visible(&mut self) {
+        let Some(component) = self
+            .live_compaction
+            .as_ref()
+            .map(super::component::LiveCompaction::to_component)
+        else {
+            return;
+        };
+        if let Some(index) = self
+            .components
+            .iter()
+            .position(|existing| existing.id() == &ComponentId::LiveCompaction)
+        {
+            self.components[index] = component;
+            self.bump_layout_epoch();
+        } else {
+            self.push_component(component);
+        }
+    }
+
     /// Toggle one tool block by its stable interned hit id. Resolving by id
     /// (not component slot) keeps clicks correct across rebuilds and scrolls.
     pub fn toggle_tool(&mut self, hit_id: u64) {

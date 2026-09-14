@@ -34,7 +34,7 @@ mod timeline_test_api;
 pub use component::TimelineKind;
 pub use component::{
     AssistantMessageComponent, ComponentId, ContentBlock, CustomMessageComponent, ErrorComponent,
-    ModelStepDividerComponent, SessionFactComponent, SummaryComponent, SummaryKind,
+    ModelStepDividerComponent, SessionFactComponent, SummaryComponent, SummaryKind, SummaryPhase,
     ThoughtComponent, ThoughtKey, ThoughtPhase, TimelineComponent, TimelineEntry, ToolEntry,
     UpstreamInfo, UserMessageComponent,
 };
@@ -69,6 +69,8 @@ pub struct Timeline {
     thought_hit_ids: HashMap<ThoughtKey, u64>,
     /// TUI-local monotonic start times for live thought rows.
     thought_starts: HashMap<ThoughtKey, std::time::Instant>,
+    /// In-flight compaction card, independent of the durable session entry.
+    live_compaction: Option<component::LiveCompaction>,
     next_hit_id: u64,
     /// Bumped by every mutation that can change render-plan geometry
     /// (`lines` / content ownership). Scroll does not bump it.

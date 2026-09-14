@@ -276,3 +276,83 @@ fn agent_subscribe_clears_optimistic_active_without_stale_timeline() {
         Some("task-child")
     );
 }
+
+#[test]
+fn compaction_started_inserts_a_live_summary_card() {
+    use crate::features::timeline::{SummaryPhase, TimelineComponent};
+
+    let mut app = live_app();
+    app.apply_event(Event::Compaction(piko_protocol::CompactionEvent::Started {
+        session_id: "session-1".into(),
+        mode: piko_protocol::command::CompactMode::Summarize,
+    }));
+    assert_eq!(
+        app.timeline().component_kinds(),
+        vec![TimelineKind::Summary]
+    );
+    let TimelineComponent::Summary(summary) = &app.timeline().components[0] else {
+        panic!("expected compaction summary");
+    };
+    assert!(matches!(summary.phase, SummaryPhase::Running { .. }));
+    assert_eq!(app.status, "compacting…");
+}
+
+#[test]
+fn compaction_snapshot_replaces_the_live_card_with_the_durable_entry() {
+    use crate::features::timeline::{ComponentId, SummaryPhase, TimelineComponent};
+    use piko_protocol::{CompactionEntry, SessionSnapshot, SessionTreeEntry};
+
+    let mut app = live_app();
+    app.apply_event(Event::Compaction(piko_protocol::CompactionEvent::Started {
+        session_id: "session-1".into(),
+        mode: piko_protocol::command::CompactMode::Summarize,
+    }));
+    app.apply_event(Event::SessionReconciled(
+        piko_protocol::SessionReconciledEvent {
+            session_id: "session-1".into(),
+            reason: piko_protocol::ReconcileReason::ExplicitRefresh,
+            cursor: piko_protocol::agent_runtime::SessionCursor {
+                epoch: "hostd:session-1".into(),
+                seq: 2,
+            },
+            snapshot: SessionSnapshot {
+                session_id: "session-1".into(),
+                cwd: "/tmp/piko-test".into(),
+                seq: 2,
+                entries: vec![SessionTreeEntry::Compaction(CompactionEntry {
+                    id: "compact-1".into(),
+                    parent_id: None,
+                    timestamp: "2".into(),
+                    summary: "kept recent turns".into(),
+                    first_kept_entry_id: "user-1".into(),
+                    tokens_before: 12_000,
+                    details: Some(serde_json::json!({ "tokensAfter": 3_000 })),
+                    from_hook: None,
+                })],
+                model_steps: Vec::new(),
+                current_leaf_id: Some("compact-1".into()),
+                selected_agent_instance_id: None,
+                agent_work: Vec::new(),
+                pending_approvals: Vec::new(),
+                pending_interactions: Vec::new(),
+                name: None,
+                cumulative_usage: None,
+                agent_usage: Vec::new(),
+                todo_lists: Vec::new(),
+            },
+            agents: Vec::new(),
+        },
+    ));
+
+    assert_eq!(
+        app.timeline().component_kinds(),
+        vec![TimelineKind::Summary]
+    );
+    let TimelineComponent::Summary(summary) = &app.timeline().components[0] else {
+        panic!("expected durable compaction summary");
+    };
+    assert_eq!(summary.id, ComponentId::EntryId("compact-1".into()));
+    assert_eq!(summary.phase, SummaryPhase::Completed);
+    assert_eq!(summary.text, "kept recent turns");
+    assert_eq!(summary.tokens_after, Some(3_000));
+}

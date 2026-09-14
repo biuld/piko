@@ -29,8 +29,11 @@ hostd owns end-to-end:
   `piko_orchd::transcript` (F-32 / D-44).
 - Non-root AgentInstance shards are not compacted through root state
   (unchanged); `SessionCompact` still targets the root shard.
-- No compaction hooks, no compaction-specific events beyond
-  `SessionReconciled`, no provider-side/cloud compaction.
+- No compaction hooks and no provider-side/cloud compaction.
+- Live client progress: `CompactionStarted` before the summarizer (or
+  new-window rewrite) and `CompactionFailed` if summarization does not
+  produce a checkpoint. The durable result remains a `Compaction` session
+  entry plus `SessionReconciled`.
 - Protocol changes must be wire-compatible: new fields carry serde defaults
   and old clients keep working unchanged.
 
@@ -106,6 +109,11 @@ pub enum CompactMode {
 `Summarize` = today's behavior (manual summarize-and-keep). Old clients that
 omit `mode` keep working. The TUI's existing `session.compact` command
 remains a `Summarize` invocation.
+
+Live progress is a `ServerMessage::Compaction` event (`started` / `failed`)
+emitted only after hostd has a real rewrite to run (a cut point, and a
+summarizer when the mode needs one). Clients must not infer compacting
+from the slash command alone.
 
 ### 3. Application: `hostd/application/compaction.rs` — reworked flow
 

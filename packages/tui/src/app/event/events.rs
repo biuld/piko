@@ -79,6 +79,29 @@ impl AppState {
         effects
     }
 
+    pub(super) fn apply_compaction(
+        &mut self,
+        event: piko_protocol::CompactionEvent,
+    ) -> Vec<Effect> {
+        match event {
+            piko_protocol::CompactionEvent::Started { session_id, mode } => {
+                if !self.accepts_session(&session_id) {
+                    return Vec::new();
+                }
+                self.timelines.start_compaction(mode);
+                self.status = "compacting…".to_string();
+            }
+            piko_protocol::CompactionEvent::Failed { session_id, error } => {
+                if !self.accepts_session(&session_id) {
+                    return Vec::new();
+                }
+                self.timelines.fail_compaction(error.clone());
+                self.status = error;
+            }
+        }
+        Vec::new()
+    }
+
     pub(super) fn apply_session_entry_committed(
         &mut self,
         committed: piko_protocol::SessionEntryCommittedEvent,

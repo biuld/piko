@@ -113,7 +113,9 @@ impl Timeline {
                 }
                 _ => false,
             };
-            let body = if matches!(component, TimelineComponent::Thought(_)) {
+            let live = matches!(component, TimelineComponent::Thought(_))
+                || matches!(component, TimelineComponent::Summary(summary) if summary.is_running());
+            let body = if live {
                 super::render::component_lines_at(
                     component,
                     self.thinking_visible,

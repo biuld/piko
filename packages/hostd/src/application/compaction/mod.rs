@@ -8,6 +8,13 @@ use crate::domain::compaction::{
 };
 use crate::util::{ClientEventSender, send_event};
 use piko_protocol::command::CompactMode;
+use piko_protocol::{CompactionEvent, ServerMessage};
+
+async fn emit_compaction(tx: Option<&ClientEventSender>, event: CompactionEvent) {
+    if let Some(tx) = tx {
+        send_event(tx, ServerMessage::Compaction(event)).await;
+    }
+}
 
 /// Fixed checkpoint message for a token-budget compact (F-05): history is
 /// dropped without a model summarization call.

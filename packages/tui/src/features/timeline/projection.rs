@@ -410,6 +410,13 @@ pub(super) fn component_from_session_entry(
                 id: ComponentId::EntryId(compaction.id.clone()),
                 kind: SummaryKind::Compaction,
                 text: compaction.summary.clone(),
+                phase: super::SummaryPhase::Completed,
+                tokens_before: (compaction.tokens_before > 0).then_some(compaction.tokens_before),
+                tokens_after: compaction_tokens_after(&compaction.details),
+                new_context_window: compaction_is_new_window(
+                    &compaction.details,
+                    &compaction.summary,
+                ),
             }))
         }
         SessionTreeEntry::BranchSummary(summary) => {
@@ -417,6 +424,10 @@ pub(super) fn component_from_session_entry(
                 id: ComponentId::EntryId(summary.id.clone()),
                 kind: SummaryKind::Branch,
                 text: summary.summary.clone(),
+                phase: super::SummaryPhase::Completed,
+                tokens_before: None,
+                tokens_after: None,
+                new_context_window: false,
             }))
         }
         SessionTreeEntry::CustomMessage(custom) if custom.display => {
@@ -450,6 +461,19 @@ pub(super) fn map_tool_status(status: piko_client_core::ToolStatus) -> crate::ap
         piko_client_core::ToolStatus::Failed => crate::app::ToolStatus::Failed,
         piko_client_core::ToolStatus::Cancelled => crate::app::ToolStatus::Cancelled,
     }
+}
+
+fn compaction_tokens_after(details: &Option<serde_json::Value>) -> Option<u64> {
+    details.as_ref()?.get("tokensAfter")?.as_u64()
+}
+
+fn compaction_is_new_window(details: &Option<serde_json::Value>, summary: &str) -> bool {
+    details
+        .as_ref()
+        .and_then(|value| value.get("trigger"))
+        .and_then(|value| value.as_str())
+        == Some("new_context_window")
+        || summary.contains("new context window")
 }
 
 #[cfg(test)]

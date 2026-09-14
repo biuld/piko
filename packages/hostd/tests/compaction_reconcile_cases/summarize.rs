@@ -57,6 +57,20 @@ piko_protocol::MessageContent::String("hello".into()),
         })
         .await;
 
+    let started_at = compact_events.iter().position(|event| {
+        matches!(
+            event,
+            Event::Compaction(piko_protocol::CompactionEvent::Started { .. })
+        )
+    });
+    let reconciled_at = compact_events
+        .iter()
+        .position(|event| matches!(event, Event::SessionReconciled(_)));
+    assert!(
+        started_at.zip(reconciled_at).is_some_and(|(start, end)| start < end),
+        "compact must emit CompactionStarted before SessionReconciled; events={compact_events:?}"
+    );
+
     let reconciled = compact_events.iter().find_map(|event| match event {
         Event::SessionReconciled(reconciled) => Some(reconciled),
         _ => None,

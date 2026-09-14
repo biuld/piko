@@ -155,7 +155,7 @@ impl HostApp {
             )
             .await;
 
-        if result.is_err() {
+        {
             let mut state = self.state.lock().await;
             if let Ok(session) = state.session_mut(session_id) {
                 session.compaction.pending = false;
@@ -247,6 +247,14 @@ impl HostApp {
             let Some(executor) = executor else {
                 return Ok(());
             };
+            emit_compaction(
+                tx,
+                CompactionEvent::Started {
+                    session_id: session_id.to_string(),
+                    mode,
+                },
+            )
+            .await;
             let (default_model_id, default_provider) = {
                 let settings = self.settings.lock().await;
                 (
@@ -314,9 +322,25 @@ impl HostApp {
                 }
             }
         } else {
+            emit_compaction(
+                tx,
+                CompactionEvent::Started {
+                    session_id: session_id.to_string(),
+                    mode,
+                },
+            )
+            .await;
             Some(NEW_CONTEXT_WINDOW_MESSAGE.to_string())
         };
         let Some(summary) = summary else {
+            emit_compaction(
+                tx,
+                CompactionEvent::Failed {
+                    session_id: session_id.to_string(),
+                    error: "compaction summarization failed".into(),
+                },
+            )
+            .await;
             return Ok(());
         };
 

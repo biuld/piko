@@ -91,6 +91,28 @@ impl From<UsageEvent> for ServerMessage {
     }
 }
 
+/// Live compaction progress. Durable checkpoints still arrive as a
+/// `Compaction` session entry plus `SessionReconciled`; these events cover the
+/// in-flight window while the summarizer runs (and explicit failure).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CompactionEvent {
+    Started {
+        session_id: SessionId,
+        mode: crate::command::CompactMode,
+    },
+    Failed {
+        session_id: SessionId,
+        error: String,
+    },
+}
+
+impl From<CompactionEvent> for ServerMessage {
+    fn from(event: CompactionEvent) -> Self {
+        Self::Compaction(event)
+    }
+}
+
 impl From<crate::StreamItemPatch> for ServerMessage {
     fn from(event: crate::StreamItemPatch) -> Self {
         Self::StreamItem(event)

@@ -128,6 +128,14 @@ fn component_fingerprint(component: &TimelineComponent) -> u64 {
             4u8.hash(&mut hasher);
             (component.kind as u8).hash(&mut hasher);
             component.text.hash(&mut hasher);
+            match component.phase {
+                super::SummaryPhase::Running { .. } => 0u8.hash(&mut hasher),
+                super::SummaryPhase::Completed => 1u8.hash(&mut hasher),
+                super::SummaryPhase::Failed => 2u8.hash(&mut hasher),
+            }
+            component.tokens_before.hash(&mut hasher);
+            component.tokens_after.hash(&mut hasher);
+            component.new_context_window.hash(&mut hasher);
         }
         TimelineComponent::CustomMessage(component) => {
             5u8.hash(&mut hasher);

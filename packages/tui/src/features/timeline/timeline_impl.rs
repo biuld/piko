@@ -10,6 +10,7 @@ impl Timeline {
             hit_ids: HashMap::new(),
             thought_hit_ids: HashMap::new(),
             thought_starts: HashMap::new(),
+            live_compaction: None,
             next_hit_id: 1,
             layout_epoch: 0,
             projection: piko_client_core::AgentTimeline::new(),
@@ -100,6 +101,9 @@ impl Timeline {
         entry: piko_protocol::SessionTreeEntry,
         branch_order: u64,
     ) -> piko_client_core::ApplyOutcome {
+        if matches!(entry, piko_protocol::SessionTreeEntry::Compaction(_)) {
+            self.finish_compaction();
+        }
         let outcome = self.projection.apply_session_entry(entry, branch_order);
         if outcome == piko_client_core::ApplyOutcome::Applied {
             self.mark_projection_applied();
@@ -179,6 +183,7 @@ impl Timeline {
         self.clear_model_step_state();
         self.thought_hit_ids.clear();
         self.thought_starts.clear();
+        self.live_compaction = None;
         // `next_hit_id` stays monotonic so ids are never reused after a clear.
         self.viewport.jump_latest();
         self.projection.clear();
@@ -457,6 +462,7 @@ impl Timeline {
                 self.components.push_back(error);
             }
         }
+        self.append_live_compaction();
         while self.components.len() > MAX_COMPONENTS {
             self.components.pop_front();
         }

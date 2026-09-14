@@ -38,6 +38,26 @@ mod observation_projection_tests {
     }
 
     #[test]
+    fn compaction_progress_round_trips() {
+        let started = ServerMessage::Compaction(CompactionEvent::Started {
+            session_id: "session-1".into(),
+            mode: crate::command::CompactMode::Summarize,
+        });
+        let failed = ServerMessage::Compaction(CompactionEvent::Failed {
+            session_id: "session-1".into(),
+            error: "summarizer failed".into(),
+        });
+        for event in [started, failed] {
+            let json = serde_json::to_string(&event).unwrap();
+            let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                serde_json::to_value(decoded).unwrap(),
+                serde_json::to_value(event).unwrap()
+            );
+        }
+    }
+
+    #[test]
     fn usage_updated_round_trips() {
         let usage = ServerMessage::Usage(UsageEvent::Updated {
             session_id: "session-1".into(),

@@ -36,6 +36,8 @@ pub enum ServerMessage {
     StreamItem(crate::StreamItemPatch),
     /// Host-authoritative current todo list for one agent (F-27).
     TodoListUpdated(crate::TodoListUpdated),
+    /// Live compaction progress so clients can show an in-stream compacting card.
+    Compaction(CompactionEvent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

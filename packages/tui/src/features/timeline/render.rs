@@ -24,9 +24,8 @@ use crate::{
 };
 
 use super::{
-    AssistantMessageComponent, ContentBlock, ModelStepDividerComponent, SummaryKind,
-    ThoughtComponent, ThoughtPhase, Timeline, TimelineComponent, ToolEntry, UpstreamInfo,
-    UserMessageComponent,
+    AssistantMessageComponent, ContentBlock, ModelStepDividerComponent, ThoughtComponent,
+    ThoughtPhase, Timeline, TimelineComponent, ToolEntry, UpstreamInfo, UserMessageComponent,
     layout::TimelineRenderPlan,
     render_diff::render_tool_body,
     tool_format::{BadgeTone, BodyLine, TitleBadge, ToolBody, ToolPresentation, present_tool},
@@ -37,6 +36,7 @@ use body::{
     apply_message_trailing_chrome, custom_message_lines, error_lines, format_message_timestamp,
     notice_lines, present_assistant_markdown, present_plain_body, present_plain_body_unguttered,
 };
+mod summary;
 
 impl Timeline {
     #[allow(dead_code)]
@@ -177,11 +177,7 @@ pub(super) fn component_lines_at(
             width,
         ),
         TimelineComponent::Summary(component) => {
-            let label = match component.kind {
-                SummaryKind::Compaction => "compaction",
-                SummaryKind::Branch => "branch summary",
-            };
-            notice_lines(label, theme.accent, component.text.clone(), width)
+            summary::summary_lines(component, theme, width, spinner_frame, now)
         }
         TimelineComponent::CustomMessage(component) => {
             custom_message_lines(component, theme, width)
@@ -392,6 +388,9 @@ use upstream::upstream_presentation;
 #[cfg(test)]
 #[path = "render_more_tests.rs"]
 mod more_tests;
+#[cfg(test)]
+#[path = "summary_tests.rs"]
+mod summary_tests;
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;

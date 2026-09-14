@@ -33,6 +33,8 @@ pub enum ComponentId {
     ModelStepId(String),
     EntryId(String),
     Local(u64),
+    /// In-flight compaction card, replaced by the durable entry when it lands.
+    LiveCompaction,
 }
 
 #[derive(Clone)]
@@ -155,10 +157,17 @@ pub struct SessionFactComponent {
     pub text: String,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SummaryKind {
     Compaction,
     Branch,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SummaryPhase {
+    Running { observed_at: std::time::Instant },
+    Completed,
+    Failed,
 }
 
 #[derive(Clone)]
@@ -167,6 +176,49 @@ pub struct SummaryComponent {
     pub id: ComponentId,
     pub kind: SummaryKind,
     pub text: String,
+    pub phase: SummaryPhase,
+    pub tokens_before: Option<u64>,
+    pub tokens_after: Option<u64>,
+    pub new_context_window: bool,
+}
+
+impl SummaryComponent {
+    pub fn is_running(&self) -> bool {
+        self.kind == SummaryKind::Compaction && matches!(self.phase, SummaryPhase::Running { .. })
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct LiveCompaction {
+    pub mode: piko_protocol::command::CompactMode,
+    pub started_at: std::time::Instant,
+    pub error: Option<String>,
+}
+
+impl LiveCompaction {
+    pub(crate) fn to_component(&self) -> TimelineComponent {
+        let (phase, text) = match &self.error {
+            Some(error) => (SummaryPhase::Failed, error.clone()),
+            None => (
+                SummaryPhase::Running {
+                    observed_at: self.started_at,
+                },
+                String::new(),
+            ),
+        };
+        TimelineComponent::Summary(SummaryComponent {
+            id: ComponentId::LiveCompaction,
+            kind: SummaryKind::Compaction,
+            text,
+            phase,
+            tokens_before: None,
+            tokens_after: None,
+            new_context_window: matches!(
+                self.mode,
+                piko_protocol::command::CompactMode::NewContextWindow
+            ),
+        })
+    }
 }
 
 #[derive(Clone)]

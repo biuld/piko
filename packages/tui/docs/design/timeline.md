@@ -346,6 +346,13 @@ Compaction summaries, branch summaries, skill invocations, and future custom
 messages should have dedicated component variants instead of being flattened
 into generic notices.
 
+Compaction is a status card in the same visual family as tool/error blocks:
+padded background, a title row, and wrapped summary body. While hostd is
+rewriting (`CompactionStarted`), the card shows a spinner and elapsed time.
+The durable `Compaction` session entry replaces that live card in place
+(success) or `CompactionFailed` finalizes it as a failed card. Branch
+summaries remain one-line notices.
+
 Custom rendering is reserved for a later extension point. It should not grant
 extensions direct access to layout slots.
 
@@ -354,6 +361,13 @@ extensions direct access to layout slots.
 ### UserMessageSubmitted
 
 Append or update a user message component keyed by `message_id`.
+
+### CompactionStarted And CompactionFailed
+
+`CompactionStarted` appends a live compaction card on every agent timeline
+for the session. `CompactionFailed` finalizes that card. A later durable
+`Compaction` session entry (snapshot rebuild or `SessionEntryCommitted`)
+replaces the live card.
 
 ### TurnStarted
 

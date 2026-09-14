@@ -99,8 +99,9 @@ open question).
   adaptation (see Fusion decisions).
 - Token-budget reminder fragments injected into the prompt (codex-rs
   `token_budget_context`); the model-visible tools cover the need in piko.
-- Compaction hooks (pre/post compact) and compaction events beyond the
-  existing `SessionReconciled` flow.
+- Compaction hooks (pre/post compact). Live client progress uses
+  `CompactionStarted` / `CompactionFailed`; the durable checkpoint still
+  lands as a `Compaction` session entry plus `SessionReconciled`.
 - Compaction of non-root AgentInstances (unchanged; the root shard owns the
   session tree projection).
 - World-state diffing across turns (owned by F-04 follow-ons).
@@ -147,8 +148,10 @@ tail) and gains a mode:
   conversation history." If the branch has no user message, the command
   fails closed.
 
-Both modes emit the existing `SessionReconciled` rewrite so clients rebuild
-their view.
+Both modes emit `CompactionStarted` before the rewrite work (so a client can
+show a compacting card with a spinner), then the existing `SessionReconciled`
+rewrite so clients rebuild their view. If summarization fails, they emit
+`CompactionFailed` and leave the session unchanged.
 
 ### Model-visible context tools (orchd)
 
